@@ -1,0 +1,65 @@
+* {
+    padding: 0;
+    margin: 0;
+    font-family: sans-serif;
+}
+
+header {
+    background: black;
+    color: white;
+    padding: 1em;
+    text-align: center;
+}
+
+main {
+    margin: 1em auto;
+    width: clamp(100px, 70ch, 95vw);
+}
+
+input {
+    display: block;
+    width: 100%;
+}
+
+.button {
+    border: 2px solid red;
+    color: red;
+    border-radius: 4px;
+    padding: 1em;
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.1s ease-in;
+}
+
+.button:hover {
+    background: rgba(255, 0, 0, 0.2);
+}
+
+section > * {
+    margin: 0.5em 0;
+}
+
+h2 {
+    margin-top: 2em;
+    text-align: center;
+}
+
+.lobby {
+    display: flex;
+    gap: 2em;
+    justify-content: space-around;
+}
+
+.lobby > div {
+    text-align: center;
+}
+
+.avatar {
+    width: 100px;
+    height: 100px;
+    background: chartreuse;
+    border-radius: 100px;
+    border: none;
+}

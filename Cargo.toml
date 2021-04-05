@@ -1,0 +1,12 @@
+[package]
+name = "warta-juge-tes-potes"
+version = "0.1.0"
+authors = ["Thibault Bustarret <thibaultbustarret@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rocket = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "8d4d01106e2e10b08100805d40bfa19a7357e900" }
+tokio-tungstenite = "0.14.0"
+tokio = { version = "1.4.0", features = ["macros"] }
