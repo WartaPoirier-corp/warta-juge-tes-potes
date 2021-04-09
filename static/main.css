@@ -56,10 +56,29 @@ h2 {
     text-align: center;
 }
 
-.avatar {
+#avatar-selector img, .avatar {
     width: 100px;
     height: 100px;
-    background: chartreuse;
     border-radius: 100px;
     border: none;
+}
+
+#avatar-selector {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+}
+
+#avatar-selector .selected {
+    box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.7);
+}
+
+#avatar-selector img {
+    cursor: pointer;
+    margin: 1em;
+    transition: all 0.1s ease-in-out;
+}
+
+#avatar-selector img:hover {
+    transform: scale(1.1);
 }

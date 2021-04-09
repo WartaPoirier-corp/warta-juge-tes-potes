@@ -1,13 +1,20 @@
 #[macro_use] extern crate rocket;
 use rocket::response::NamedFile;
-use std::env;
-use tokio::net::{TcpListener, TcpStream};
-use rocket::futures::{StreamExt, TryStreamExt};
-use std::net::SocketAddr;
+use rocket::State;
+use std::sync::Mutex;
+use serde::{Serialize, Deserialize};
 
 type Player = String;
 type Question = String;
+type Vote = (Player, Player);
 
+struct Room {
+    code: String,
+    players: Vec<Player>
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "tag")]
 enum WsEvent {
     /***** Server *****/
     /// When Server created a room and tells Client that the room is ready
@@ -15,7 +22,7 @@ enum WsEvent {
         code: String,
     },
     /// When Server sends all the infos about the room to a Client that has just joined
-    RoomJoin {
+    OnRoomJoin {
         code: String,
         players: Vec<Player>,
         // TODO règles
@@ -35,65 +42,76 @@ enum WsEvent {
         ready_player_count: u32,
     },
     /// When Server tells Clients that the round is over (the time is over / everyone responded)
-    RoundOver,
-    
-
+    RoundOver {
+        votes: Vec<Vote>,
+    },
+    /***** Client *****/
+    /// Client ask Server to create a room
+    CreateRoom, //TODO règles
+    /// When Client joins a room
+    JoinRoom {
+        username: String,
+        avatar: String,
+        code: String,
+    },
+    /// When Client answers to a question
+    Answer {
+        vote: Vote,
+    },
+    /// Request to the server to start the game with the same room
+    NewGame,    
 
 }
 
-#[tokio::main]
-async fn main() {
-    tokio::join!(
-        websocket(),
-        rocket().launch(),
-    ).1.ok();
+lazy_static::lazy_static! {
+    static ref ROOMS: Mutex<Vec<Room>> = Mutex::new(vec![]);
 }
 
-async fn websocket() {
-    // Fetch an adress for the server, if there is none take a default one
-    let addr = match env::args().nth(1) {
-        Some(address) => address,
-        None => "127.0.0.1:8008".to_string()        
-    };
-    // Create a TcpListener and binds it to the adress defined above. Used for websockets
-    let try_socket = TcpListener::bind(&addr).await;
-    let listener = try_socket.expect("Failed to bind WS");
-    println!("Listening on: {}", addr);
-
-    // Let's spawn the handling of each connection in a separate task.
-    while let Ok((stream, addr)) = listener.accept().await {
-        tokio::spawn(handle_connection(stream, addr));
-    }
-}
-
-async fn handle_connection(raw_stream: TcpStream, addr: SocketAddr) {
-    println!("Incoming TCP connection from: {}", addr);
-
-    let ws_stream = tokio_tungstenite::accept_async(raw_stream)
-        .await
-        .expect("Error during the websocket handshake occurred");
-    println!("WebSocket connection established: {}", addr);
-
-    let (outgoing, incoming) = ws_stream.split();
-
-    let broadcast_incoming = incoming.try_for_each(|msg| {
-        println!("Received a message from {}: {}", addr, msg.to_text().unwrap());
-
-        // outgoing.unbounded_send(msg.clone()).unwrap();
-
-        std::future::ready(Ok(()))
-    }).await;
-
-    println!("{} disconnected", &addr);
-}
-
+#[rocket::launch]
 fn rocket() -> rocket::Rocket {
     rocket::ignite()
         .mount("/", routes![
             index,
-            js,
-            css,
         ])
+        .mount("/static", rocket_contrib::serve::StaticFiles::from("static"))
+        .attach(rocket::fairing::AdHoc::on_launch("WebSocket", |_| {
+            std::thread::spawn(|| {
+                ws::listen("127.0.0.1:8008", |out| {
+                    move |msg| {
+                        //out.send(msg)
+                        use WsEvent::*;
+                        let msg = match msg {
+                            ws::Message::Text(s) => s,
+                            _ => unreachable!(),
+                        };
+                        let evt : WsEvent = serde_json::from_str(&msg).unwrap();
+                        match evt {
+                            CreateRoom => {
+                                println!("creating room");
+                                let room = Room::create();
+                                let msg = serde_json::to_string(&RoomCreated{ code: room.code.clone() }).unwrap();
+
+                                ROOMS.lock()
+                                    .unwrap()
+                                    .push(room);
+
+                                out.send(ws::Message::Text(msg))?;
+                            },
+                            JoinRoom {
+                                username, avatar: _, code
+                            } => {
+                                println!("room {} joined by {}", code, username);
+                            },
+                            Answer { vote: _ } => todo!(),
+                            NewGame => todo!(),
+                            _ => unreachable!(),
+                        }
+
+                        Ok(())
+                    }
+                }).unwrap();
+            });
+        }))
 }
 
 #[get("/")]
@@ -101,12 +119,11 @@ async fn index() -> NamedFile {
     NamedFile::open("static/index.html").await.unwrap()
 }
 
-#[get("/main.css")]
-async fn css() -> NamedFile {
-    NamedFile::open("static/main.css").await.unwrap()
-}
-
-#[get("/main.js")]
-async fn js() -> NamedFile {
-    NamedFile::open("static/main.js").await.unwrap()
+impl Room {
+    fn create() -> Room {
+        Room {
+            code: "BOUYA123".to_string(),
+            players: vec![]
+        }
+    }
 }
