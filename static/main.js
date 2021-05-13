@@ -1,4 +1,18 @@
-const socket = new WebSocket('ws://localhost:8008')
+const CONNECTING = 0
+const CONNECTED = 1
+const DISCONNECTED = 2
+let connectionState = CONNECTING
+
+const socket = new WebSocket('ws://192.168.1.16:8008')
+
+socket.addEventListener('error', _ => {
+    connectionState = DISCONNECTED
+    m.redraw()
+})
+socket.addEventListener('open', _ => {
+    connectionState = CONNECTED
+    m.redraw()
+})
 
 const send = msg => socket.send(JSON.stringify(msg))
 
@@ -9,7 +23,7 @@ const avatars = [
     'ablobspin',
     'amaze',
     'babaleine',
-    'bisexual_flag',
+    'bisexual_flag'/*,
     'blobcatlost',
     'blobcatmeltcry',
     'blobcatpeek',
@@ -66,17 +80,19 @@ const avatars = [
     'tinking',
     'transgender_flag',
     'unsafe',
-    'vero'
+    'vero'*/
 ]
 
 // State
 let game = 'CACA'
+let name = ''
 let players = [ 'TIBO', 'Analogie' ]
 let question = 'Qui est un prout ?'
 let avatar = avatars[0]
 
 socket.addEventListener('message', event => {
     const data = JSON.parse(event.data)
+    console.log("Received : ", data)
     switch (data.tag) {
         case 'RoomCreated':
             game = data.code
@@ -88,9 +104,8 @@ socket.addEventListener('message', event => {
             })
             break
         case 'OnRoomJoin':
-            game = data.code
             players = data.players
-            m.redraw()
+            m.route.set('/lobby')
             break
         case 'RoomUpdate':
             players = data.players
@@ -107,9 +122,18 @@ socket.addEventListener('message', event => {
     }
 })
 
+const showConnectionState = () => {
+    if (connectionState == DISCONNECTED) {
+        return m('div', { className: 'warning' }, 'T\'es hors ligne')
+    } else {
+        return null
+    }
+}
+
 const Home = {
     view: () => {
         return m('main', {}, [
+            showConnectionState(),
             m('section', {}, [
                 m('h2', {}, 'T ki'),
                 m('p', {}, 'Entre ton nom et choisi ton avatar.'),
@@ -131,6 +155,7 @@ const Home = {
                 m('h2', {}, 'Créer une partie'),
                 m('p', {}, 'Creéz une partie depuis un ordinateur (ou autre grand écran que tout le monde peut voir). Vous pourrez ensuite la rejoindre avec vos téléphones.'),
                 m('a', { className: 'button', onclick: () => {
+                    name = document.getElementById('username').value
                     send({
                         tag: 'CreateRoom'
                     })
@@ -141,10 +166,13 @@ const Home = {
                 m('p', {}, 'Entrez le code de la partie qui s\'affiche sur le grand écran.'),
                 m('input', { id: 'code' }),
                 m('a', { className: 'button', href: '#', onclick: () => {
+                    game = document.getElementById('code').value
+                    name = document.getElementById('username').value
                     send({
+                        tag: 'JoinRoom',
                         avatar: avatar,
-                        username: document.getElementById('username').value,
-                        code: document.getElementById('code').value
+                        username: name,
+                        code: game
                     })
                 } }, 'Rejoindre')
             ])
@@ -152,20 +180,28 @@ const Home = {
     }
 }
 
-const Lobby = {
+const LobbyLGBT = {
     view: () => m('main', {}, [
+        showConnectionState(),
         m('h2', {}, game),
         m('section', { className: 'lobby' },
             players.map(x => m('div', {}, [
-                m('img', { className: 'avatar' }),
-                m('p', {}, x),
+                m('img', { className: 'avatar', src: `/static/avatars/${x.avatar}.png` }),
+                m('p', {}, x.username),
             ]))
-        )
+        ),
+        name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
+            send({
+                tag: 'StartGame',
+                code: game
+            })
+        } }, 'Lancer la partie') : null
     ])
 }
 
 const Question = {
     view: () => m('main', {}, [
+        showConnectionState(),
         m('h2', {}, question),
         m('section', {}, players.map(x => m('a', { className: 'button' }, x)))
     ])
@@ -173,6 +209,7 @@ const Question = {
 
 const Result = {
     view: () => m('main', {}, [
+        showConnectionState(),
         m('h2', {}, 'Résultats'),
         m('h3', {}, question),
         m('section', {}, answers.map(a =>
@@ -187,7 +224,7 @@ const Result = {
 
 m.route(document.getElementById('app'), '/home', {
     '/home': Home,
-    '/lobby': Lobby,
+    '/lobby': LobbyLGBT,
     '/question': Question,
     '/result': Result,
 })
