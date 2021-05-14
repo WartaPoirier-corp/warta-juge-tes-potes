@@ -92,6 +92,7 @@ let question = 'Si tu vois ça c\'est que ça bug, retourne à l\'accueil'
 let avatar = avatars[0]
 let readyCounter = 0
 let answers = []
+let answered = false
 
 socket.addEventListener('message', event => {
     const data = JSON.parse(event.data)
@@ -116,6 +117,8 @@ socket.addEventListener('message', event => {
             break
         case 'NewRound':
             question = data.question
+            answered = false
+            readyCounter = 0
             m.route.set('/question')
             break
         case 'RoundUpdate':
@@ -126,7 +129,6 @@ socket.addEventListener('message', event => {
             answers = []
             for (const vote of data.votes) {
                 let idx = answers.findIndex(x => x.username == vote[1])
-                console.log(vote)
                 if (idx == -1) {
                     answers.push({
                         username: vote[1],
@@ -137,6 +139,7 @@ socket.addEventListener('message', event => {
                 }
                 answers[idx].votes += 1
             }
+            answers.sort((a, b) => a.votes - b.votes)
             m.route.set('/result')
             break
         default:
@@ -208,7 +211,7 @@ const Home = {
 const LobbyLGBT = {
     view: () => m('main', {}, [
         showConnectionState(),
-        m('h2', {}, game),
+        m('h2', {}, `Code de la partie : ${game}`),
         m('section', { className: 'lobby' },
             players.map(x => m('div', {}, [
                 m('img', { className: 'avatar', src: `/static/avatars/${x.avatar}.png` }),
@@ -229,13 +232,17 @@ const Question = {
         showConnectionState(),
         m('h2', {}, question),
         m('h3', {}, `${readyCounter} / ${players.length} réponses`),
-        m('section', {}, players.map(x => m('a', { className: 'button', onclick: () => {
+        m('section', { className: 'choices' }, players.map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
             send({
                 tag: 'Answer',
                 code: game,
                 vote: [name, x.username]
             })
-        } }, x.username)))
+            answered = true
+        } }, [
+            m('img', { className: 'avatar', src: `/static/avatars/${x.avatar}.png` }),
+            m('p', {}, x.username)
+        ])))
     ])
 }
 

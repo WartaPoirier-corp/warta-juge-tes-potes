@@ -1,17 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Pangolin&display=swap');
+
 * {
     padding: 0;
     margin: 0;
-    font-family: sans-serif;
+}
+
+body {
+    font-family: 'Pangolin', cursive;
+    background: linear-gradient(#131316 0, #1D1C21 100vh);
+    background-attachment: fixed;
+    color: #F8FFF4;
 }
 
 header {
-    background: black;
     padding: 1em;
     text-align: center;
 }
 
 header a, header a:visited {
-    color: white;
+    color: #F8FFF4;
     text-decoration: none;
 }
 
@@ -22,12 +29,17 @@ main {
 
 input {
     display: block;
-    width: 100%;
+    width: calc(100% - 2em - 4px);
+    border: 2px solid #8075FF;
+    border-radius: 4px;
+    background: transparent;
+    color: #F8FFF4;
+    padding: 1em;
 }
 
 .button {
-    border: 2px solid red;
-    color: red;
+    border: 2px solid #8075FF;
+    color: #8075FF;
     border-radius: 4px;
     padding: 1em;
     display: block;
@@ -38,7 +50,12 @@ input {
 }
 
 .button:hover {
-    background: rgba(255, 0, 0, 0.2);
+    background: #8075FF88;
+}
+
+.button.disabled, button.disabled:hover {
+    filter: grayscale(75%);
+    cursor: not-allowed;
 }
 
 section > * {
@@ -48,16 +65,22 @@ section > * {
 h2 {
     margin-top: 2em;
     text-align: center;
+    font-size: 3rem;
 }
 
 .lobby {
     display: flex;
     gap: 2em;
     justify-content: space-around;
+    flex-wrap: wrap;
 }
 
 .lobby > div {
     text-align: center;
+}
+
+section {
+    margin: 2em 0;
 }
 
 #avatar-selector img, .avatar {
@@ -65,6 +88,7 @@ h2 {
     height: 100px;
     border-radius: 100px;
     border: none;
+    box-sizing: border-box;
 }
 
 #avatar-selector {
@@ -74,7 +98,8 @@ h2 {
 }
 
 #avatar-selector .selected {
-    box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.7);
+    border: 2px solid #8075FF;
+    background: #8075FF88;
 }
 
 #avatar-selector img {
@@ -109,10 +134,11 @@ h2 {
     display: flex;
     align-items: center;
     margin: 2em 0;
+    background: linear-gradient(90deg, #8075FF88 var(--percent), transparent var(--percent));
     background-size: 0%;
-    background: linear-gradient(90deg, rgba(255, 0, 0, 0.2) var(--percent), transparent var(--percent));
     border-radius: 4px;
     animation: bounce 0.2s ease-in-out;
+    animation-fill-mode: forwards;
     background-repeat: no-repeat;
     padding: 1em;
 }
@@ -134,4 +160,14 @@ h2 {
 
 h3 {
     text-align: center;
+}
+
+.choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2em;
+}
+
+.choices > * {
+    flex: 1;
 }
