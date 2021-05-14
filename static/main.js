@@ -89,6 +89,8 @@ let name = ''
 let players = [ 'TIBO', 'Analogie' ]
 let question = 'Qui est un prout ?'
 let avatar = avatars[0]
+let readyCounter = 0
+let answers = []
 
 socket.addEventListener('message', event => {
     const data = JSON.parse(event.data)
@@ -112,9 +114,29 @@ socket.addEventListener('message', event => {
             m.redraw()
             break
         case 'NewRound':
-        case 'GameStart':
             question = data.question
             m.route.set('/question')
+            break
+        case 'RoundUpdate':
+            readyCount = data.ready_player_count
+            m.redraw()
+            break
+        case 'RoundOver':
+            answers = []
+            for (const vote of data.votes) {
+                let idx = answers.findIndex(x => x.username == vote[1])
+                console.log(vote)
+                if (idx == -1) {
+                    answers.push({
+                        username: vote[1],
+                        avatar: players.find(x => x.username == vote[1]).avatar,
+                        votes: 0
+                    })
+                    idx = answers.length - 1
+                }
+                answers[idx].votes += 1
+            }
+            m.route.set('/result')
             break
         default:
             console.log('Unknown message', data)
@@ -192,7 +214,7 @@ const LobbyLGBT = {
         ),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
             send({
-                tag: 'StartGame',
+                tag: 'StartRound',
                 code: game
             })
         } }, 'Lancer la partie') : null
@@ -203,7 +225,13 @@ const Question = {
     view: () => m('main', {}, [
         showConnectionState(),
         m('h2', {}, question),
-        m('section', {}, players.map(x => m('a', { className: 'button' }, x)))
+        m('section', {}, players.map(x => m('a', { className: 'button', onclick: () => {
+            send({
+                tag: 'Answer',
+                code: game,
+                vote: [name, x.username]
+            })
+        } }, x.username)))
     ])
 }
 
@@ -214,11 +242,17 @@ const Result = {
         m('h3', {}, question),
         m('section', {}, answers.map(a =>
             m('div', {}, [
-                m('img', { src: a.avatar }),
+                m('img', { className: 'avatar', src: `/static/avatars/${a.avatar}.png` }),
                 m('p', {}, a.username),
                 m('p', {}, `${a.votes} votes`)
             ])
-        ))
+        )),
+        name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
+            send({
+                tag: 'StartRound',
+                code: game
+            })
+        } }, 'Question suivante') : null
     ])
 }
 

@@ -1,8 +1,9 @@
-#[macro_use] extern crate rocket;
+#[macro_use]
+extern crate rocket;
 use rocket::response::NamedFile;
-use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
+use std::sync::Mutex;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -12,44 +13,37 @@ struct Player {
     ws: ws::Sender,
 }
 type Question = String;
-type Vote = (String, String);
+// First username : Player who voted, second username: Choice
+type Vote = (Username, Username);
+type Username = String;
 
 #[derive(Debug)]
 struct Room {
     code: String,
-    players: Vec<Player>
+    players: Vec<Player>,
+    votes: Vec<Vote>
 }
 
 #[derive(Serialize)]
 #[serde(tag = "tag")]
 enum ServerEvent {
     /// When Server created a room and tells Client that the room is ready
-    RoomCreated {
-        code: String,
-    },
+    RoomCreated { code: String },
     /// When Server sends all the infos about the room to a Client that has just joined
     OnRoomJoin {
         players: Vec<Player>,
         // TODO règles
     },
     /// When Server tells Clients that something has changed in the room (e.g. new player)
-    RoomUpdate {
-        players: Vec<Player>,
-    },
-    /// When Server tells Clients that the game has started
-    GameStart,
-    /// When Server tells the new round's infos to Clients
+    RoomUpdate { players: Vec<Player> },
+    /// When Server tells Clients that a new Round has started (May also start the game)
     NewRound {
         question: Question,
     },
-    /// When Server tells Clients that something has changed in the round (e.g. X players have responded)
-    RoundUpdate {
-        ready_player_count: u32,
-    },
+    //Server tells Clients that something has changed in the round (e.g. X players have responded)
+    RoundUpdate { ready_player_count: u32 },
     /// When Server tells Clients that the round is over (the time is over / everyone responded)
-    RoundOver {
-        votes: Vec<Vote>,
-    },
+    RoundOver { votes: Vec<Vote> },
 }
 
 #[derive(Deserialize)]
@@ -60,21 +54,14 @@ enum ClientEvent {
     CreateRoom, //TODO règles
     /// When Client joins a room
     JoinRoom {
-        username: String,
+        username: Username,
         avatar: String,
         code: String,
     },
     /// When the admin of the room starts the game
-    StartGame {
-        code: String,
-    },
+    StartRound { code: String },
     /// When Client answers to a question
-    Answer {
-        vote: Vote,
-    },
-    /// Request to the server to start the game with the same room
-    NewGame,
-
+    Answer { code : String, vote: Vote },
 }
 
 lazy_static::lazy_static! {
@@ -86,67 +73,107 @@ fn send_msg(out: &ws::Sender, msg: &ServerEvent) -> ws::Result<()> {
     out.send(ws::Message::Text(msg))
 }
 
-
 #[rocket::launch]
 fn rocket() -> rocket::Rocket {
     rocket::ignite()
-        .mount("/", routes![
-            index,
-        ])
-        .mount("/static", rocket_contrib::serve::StaticFiles::from("static"))
+        .mount("/", routes![index,])
+        .mount(
+            "/static",
+            rocket_contrib::serve::StaticFiles::from("static"),
+        )
         .attach(rocket::fairing::AdHoc::on_launch("WebSocket", |_| {
             std::thread::spawn(|| {
                 ws::listen("0.0.0.0:8008", |out| {
                     move |msg| {
-                        use ServerEvent::*;
                         use ClientEvent::*;
+                        use ServerEvent::*;
 
                         let msg = match msg {
                             ws::Message::Text(s) => s,
                             _ => unreachable!(),
                         };
-                        let evt : ClientEvent = serde_json::from_str(&msg).unwrap();
-                        let response = match evt {
+                        let evt: ClientEvent = serde_json::from_str(&msg).unwrap();
+                        match evt {
                             CreateRoom => {
                                 let room = Room::create();
-                                let res = RoomCreated { code: room.code.clone() };
+                                let res = RoomCreated {
+                                    code: room.code.clone(),
+                                };
 
-                                ROOMS.lock()
-                                    .unwrap()
-                                    .insert(room.code.clone(), room);
+                                ROOMS.lock().unwrap().insert(room.code.clone(), room);
 
-                                res
-                            },
+                                send_msg(&out, &res)?;
+                            }
                             JoinRoom {
-                                username, avatar, code
+                                username,
+                                avatar,
+                                code,
                             } => {
                                 // Get the room of given code
                                 let mut rooms = ROOMS.lock().unwrap();
                                 let room = rooms.get_mut(&code).unwrap();
-                                    
+
                                 // Fetch the websocket Sender element for each player, in order to send a RoomUpdate event
                                 let ws_others = room.players.clone().into_iter().map(|x| x.ws);
 
                                 // Add the player to the room
-                                room.players.push(Player { username, avatar, ws: out.clone() });
-                                
+                                room.join(Player {
+                                    username,
+                                    avatar,
+                                    ws: out.clone(),
+                                });
+
                                 println!("Room = {:?}", room);
 
                                 // Send an update to each other player
                                 for other in ws_others {
-                                    send_msg(&other, &RoomUpdate { players: room.players.clone() })?;
+                                    send_msg(
+                                        &other,
+                                        &RoomUpdate {
+                                            players: room.players.clone(),
+                                        },
+                                    )?;
                                 }
 
-                                OnRoomJoin { players: room.players.clone() }
+                                send_msg(
+                                    &out,
+                                    &OnRoomJoin {
+                                        players: room.players.clone(),
+                                    },
+                                )?;
+                            }
+                            StartRound { code } => {
+                                // Get the room of given code
+
+                                let mut rooms = ROOMS.lock().unwrap();
+                                let room = rooms.get_mut(&code).unwrap();
+                                room.votes.clear();
+                                let question = "Salut sa va ?".to_string();
+                                for player in &room.players {
+                                    send_msg(&player.ws, &NewRound{ question : question.clone() })?;
+                                }
+                            }
+                            Answer { code, vote } => {
+                                let mut rooms = ROOMS.lock().unwrap();
+                                let room = rooms.get_mut(&code).unwrap();
+                                room.record_vote(vote);
+                                let res = if room.votes.len() < room.players.len() {
+                                    RoundUpdate{ ready_player_count : room.votes.len() as u32 }
+                                } else {
+                                    RoundOver { votes : room.votes.clone() }
+                                };
+
+                                for player in &room.players {
+                                    send_msg(&player.ws, &res)?;
+                                };
+
                             },
-                            StartGame { code: _ } => todo!(),
-                            Answer { vote: _ } => todo!(),
-                            NewGame => todo!(),
-                        };
-                        
-                        send_msg(&out, &response)
+                        }
+
+                        Ok(())
                     }
-                }).unwrap();
+                })
+                .unwrap();
             });
         }))
 }
@@ -160,11 +187,18 @@ impl Room {
     fn create() -> Room {
         Room {
             code: "BOUYA123".to_string(),
-            players: vec![]
+            players: vec![],
+            votes: vec![]
         }
     }
 
-    fn join(&mut self, player : Player) {
+    fn join(&mut self, player: Player) {
         self.players.push(player);
+    }
+
+    fn record_vote(&mut self, vote: Vote) {
+        if !self.votes.iter().any(|x| x.0 == vote.0){
+            self.votes.push(vote);
+        }
     }
 }
