@@ -6,9 +6,13 @@
 
 header {
     background: black;
-    color: white;
     padding: 1em;
     text-align: center;
+}
+
+header a, header a:visited {
+    color: white;
+    text-decoration: none;
 }
 
 main {
@@ -86,5 +90,48 @@ h2 {
 .warning {
     text-align: center;
     font-weight: bold;
+    background: rgba(255, 0, 0, 0.2);
+    padding: 1em;
     color: red;
+    border-radius: 4px; 
+}
+
+.info {
+    text-align: center;
+    font-weight: bold;
+    background: rgba(107, 163, 104, 0.2);
+    padding: 1em;
+    color: #6BA368;
+    border-radius: 4px; 
+}
+
+.result {
+    display: flex;
+    align-items: center;
+    margin: 2em 0;
+    background-size: 0%;
+    background: linear-gradient(90deg, rgba(255, 0, 0, 0.2) var(--percent), transparent var(--percent));
+    border-radius: 4px;
+    animation: bounce 0.2s ease-in-out;
+    background-repeat: no-repeat;
+    padding: 1em;
+}
+
+@keyframes bounce {
+    from {
+        background-size: 0%;
+    }
+    to {
+        background-size: 100%;
+    }
+}
+
+.result p:first-of-type {
+    flex: 1;
+    margin: 0 1em;
+    font-size: 1.5em;
+}
+
+h3 {
+    text-align: center;
 }

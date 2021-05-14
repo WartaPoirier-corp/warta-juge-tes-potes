@@ -3,7 +3,8 @@ const CONNECTED = 1
 const DISCONNECTED = 2
 let connectionState = CONNECTING
 
-const socket = new WebSocket('ws://192.168.1.16:8008')
+const protocol = location.protocol === 'http:' ? 'ws' : 'wss'
+const socket = new WebSocket(`${protocol}://${location.hostname}:8008`)
 
 socket.addEventListener('error', _ => {
     connectionState = DISCONNECTED
@@ -23,7 +24,7 @@ const avatars = [
     'ablobspin',
     'amaze',
     'babaleine',
-    'bisexual_flag'/*,
+    'bisexual_flag',
     'blobcatlost',
     'blobcatmeltcry',
     'blobcatpeek',
@@ -80,14 +81,14 @@ const avatars = [
     'tinking',
     'transgender_flag',
     'unsafe',
-    'vero'*/
+    'vero'
 ]
 
 // State
-let game = 'CACA'
+let game = ''
 let name = ''
-let players = [ 'TIBO', 'Analogie' ]
-let question = 'Qui est un prout ?'
+let players = []
+let question = 'Si tu vois ça c\'est que ça bug, retourne à l\'accueil'
 let avatar = avatars[0]
 let readyCounter = 0
 let answers = []
@@ -118,7 +119,7 @@ socket.addEventListener('message', event => {
             m.route.set('/question')
             break
         case 'RoundUpdate':
-            readyCount = data.ready_player_count
+            readyCounter = data.ready_player_count
             m.redraw()
             break
         case 'RoundOver':
@@ -147,6 +148,8 @@ socket.addEventListener('message', event => {
 const showConnectionState = () => {
     if (connectionState == DISCONNECTED) {
         return m('div', { className: 'warning' }, 'T\'es hors ligne')
+    } else if (connectionState == CONNECTING) {
+        return m('div', { className: 'info' }, 'Connection en cours…')
     } else {
         return null
     }
@@ -225,6 +228,7 @@ const Question = {
     view: () => m('main', {}, [
         showConnectionState(),
         m('h2', {}, question),
+        m('h3', {}, `${readyCounter} / ${players.length} réponses`),
         m('section', {}, players.map(x => m('a', { className: 'button', onclick: () => {
             send({
                 tag: 'Answer',
@@ -240,11 +244,11 @@ const Result = {
         showConnectionState(),
         m('h2', {}, 'Résultats'),
         m('h3', {}, question),
-        m('section', {}, answers.map(a =>
-            m('div', {}, [
+        m('section', {}, answers.map((a, i) =>
+            m('div', { className: 'result', style: `--percent: ${a.votes / players.length * 100}%; animation-delay: ${i * 0.2}s;` }, [
                 m('img', { className: 'avatar', src: `/static/avatars/${a.avatar}.png` }),
                 m('p', {}, a.username),
-                m('p', {}, `${a.votes} votes`)
+                m('p', {}, `${a.votes} vote${a.votes <= 1 ? '' : 's'}`)
             ])
         )),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
