@@ -61,4 +61,5 @@
         ("Gérald Darmanin", "darmanin.jpg", "Gezelin Gree"),
     ]),
     Question("Qui serait assez maladroit⋅e pour laisser s'échapper un virus ultra dangereux d'un laboratoire ?"),
+    Question("Qui commencerait à halluciner après une nuit blanche ?"),
 ]
