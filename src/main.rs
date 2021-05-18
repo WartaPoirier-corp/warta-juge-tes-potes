@@ -4,6 +4,7 @@ use rocket::response::NamedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use rand::seq::IteratorRandom;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -12,7 +13,12 @@ struct Player {
     #[serde(skip)]
     ws: ws::Sender,
 }
-type Question = String;
+
+#[derive(Deserialize)]
+enum Prompt {
+    Question(String),
+    Tag(String, Vec<(String, String, String)>),
+}
 // First username : Player who voted, second username: Choice
 type Vote = (Username, Username);
 type Username = String;
@@ -21,29 +27,39 @@ type Username = String;
 struct Room {
     code: String,
     players: Vec<Player>,
-    votes: Vec<Vote>
+    votes: Vec<Vote>,
+    questions_count: u32,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "tag")]
 enum ServerEvent {
     /// When Server created a room and tells Client that the room is ready
-    RoomCreated { code: String },
+    RoomCreated {
+        code: String,
+    },
     /// When Server sends all the infos about the room to a Client that has just joined
     OnRoomJoin {
         players: Vec<Player>,
         // TODO règles
     },
     /// When Server tells Clients that something has changed in the room (e.g. new player)
-    RoomUpdate { players: Vec<Player> },
+    RoomUpdate {
+        players: Vec<Player>,
+    },
     /// When Server tells Clients that a new Round has started (May also start the game)
     NewRound {
-        question: Question,
+        question: String,
     },
     //Server tells Clients that something has changed in the round (e.g. X players have responded)
-    RoundUpdate { ready_player_count: u32 },
+    RoundUpdate {
+        ready_player_count: u32,
+    },
     /// When Server tells Clients that the round is over (the time is over / everyone responded)
-    RoundOver { votes: Vec<Vote> },
+    RoundOver {
+        votes: Vec<Vote>,
+    },
+    GameOver,
 }
 
 #[derive(Deserialize)]
@@ -61,7 +77,7 @@ enum ClientEvent {
     /// When the admin of the room starts the game
     StartRound { code: String },
     /// When Client answers to a question
-    Answer { code : String, vote: Vote },
+    Answer { code: String, vote: Vote },
 }
 
 lazy_static::lazy_static! {
@@ -87,6 +103,10 @@ fn rocket() -> rocket::Rocket {
                     move |msg| {
                         use ClientEvent::*;
                         use ServerEvent::*;
+
+                        // TODO: c pa opti
+                        let content = std::fs::read_to_string("questions.ron").unwrap();
+                        let questions : Vec<Prompt> = ron::from_str(&content).unwrap();
 
                         let msg = match msg {
                             ws::Message::Text(s) => s,
@@ -146,11 +166,30 @@ fn rocket() -> rocket::Rocket {
                                 // Get the room of given code
 
                                 let mut rooms = ROOMS.lock().unwrap();
-                                let room = rooms.get_mut(&code).unwrap();
+                                let mut room = rooms.get_mut(&code).unwrap();
                                 room.votes.clear();
-                                let question = "Salut sa va ?".to_string();
-                                for player in &room.players {
-                                    send_msg(&player.ws, &NewRound{ question : question.clone() })?;
+                                if room.questions_count > 9 {
+                                    println!("Test");
+                                    for player in &room.players {
+                                        send_msg(&player.ws, &GameOver)?;
+                                    }
+                                } else {
+                                    room.questions_count += 1;
+                                    let mut rng = rand::thread_rng();
+                                    let mut question = questions.iter().choose(&mut rng).unwrap();
+                                    while let Prompt::Tag(_, _) = question {
+                                        question = questions.iter().choose(&mut rng).unwrap();
+                                    }
+                                    if let Prompt::Question(question) = question {
+                                        for player in &room.players {
+                                            send_msg(
+                                                &player.ws,
+                                                &NewRound {
+                                                    question: question.clone(),
+                                                },
+                                            )?;
+                                        }
+                                    }
                                 }
                             }
                             Answer { code, vote } => {
@@ -158,16 +197,19 @@ fn rocket() -> rocket::Rocket {
                                 let room = rooms.get_mut(&code).unwrap();
                                 room.record_vote(vote);
                                 let res = if room.votes.len() < room.players.len() {
-                                    RoundUpdate{ ready_player_count : room.votes.len() as u32 }
+                                    RoundUpdate {
+                                        ready_player_count: room.votes.len() as u32,
+                                    }
                                 } else {
-                                    RoundOver { votes : room.votes.clone() }
+                                    RoundOver {
+                                        votes: room.votes.clone(),
+                                    }
                                 };
 
                                 for player in &room.players {
                                     send_msg(&player.ws, &res)?;
-                                };
-
-                            },
+                                }
+                            }
                         }
 
                         Ok(())
@@ -188,7 +230,8 @@ impl Room {
         Room {
             code: "BOUYA123".to_string(),
             players: vec![],
-            votes: vec![]
+            votes: vec![],
+            questions_count: 0,
         }
     }
 
@@ -197,7 +240,7 @@ impl Room {
     }
 
     fn record_vote(&mut self, vote: Vote) {
-        if !self.votes.iter().any(|x| x.0 == vote.0){
+        if !self.votes.iter().any(|x| x.0 == vote.0) {
             self.votes.push(vote);
         }
     }

@@ -142,6 +142,8 @@ socket.addEventListener('message', event => {
             answers.sort((a, b) => a.votes - b.votes)
             m.route.set('/result')
             break
+        case 'GameOver':
+            m.route('/home')
         default:
             console.log('Unknown message', data)
             break
@@ -164,7 +166,7 @@ const Home = {
             showConnectionState(),
             m('section', {}, [
                 m('h2', {}, 'T ki'),
-                m('p', {}, 'Entre ton nom et choisi ton avatar.'),
+                m('p', {}, 'Entre ton nom et choisis ton avatar.'),
                 m('input', { id: 'username' }),
                 m('div', { id: 'avatar-selector' }, avatars.map(a =>
                     m('img', {
