@@ -19,7 +19,16 @@ enum Prompt {
     Question(String),
     Tag(String, Vec<(String, String, String)>),
 }
-// First username : Player who voted, second username: Choice
+
+#[derive(Serialize)]
+#[serde(tag = "tag", content = "prompt")]
+enum ClientPrompt<'a> {
+    Question(&'a str),
+    Tag(&'a str, &'a str, Vec<(&'a str, &'a str, &'a str)>)
+}
+
+// For a question : First username = Player who voted, second username = Choice
+// For a Tag : First username = Player who voted, second username = Choice
 type Vote = (Username, Username);
 type Username = String;
 
@@ -29,11 +38,12 @@ struct Room {
     players: Vec<Player>,
     votes: Vec<Vote>,
     questions_count: u32,
+    questions: Vec<usize>,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "tag")]
-enum ServerEvent {
+enum ServerEvent<'a> {
     /// When Server created a room and tells Client that the room is ready
     RoomCreated {
         code: String,
@@ -49,7 +59,7 @@ enum ServerEvent {
     },
     /// When Server tells Clients that a new Round has started (May also start the game)
     NewRound {
-        question: String,
+        question: ClientPrompt<'a>,
     },
     //Server tells Clients that something has changed in the round (e.g. X players have responded)
     RoundUpdate {
@@ -115,7 +125,8 @@ fn rocket() -> rocket::Rocket {
                         let evt: ClientEvent = serde_json::from_str(&msg).unwrap();
                         match evt {
                             CreateRoom => {
-                                let room = Room::create();
+                                let mut rng = rand::thread_rng();
+                                let room = Room::create(&questions, &mut rng);
                                 let res = RoomCreated {
                                     code: room.code.clone(),
                                 };
@@ -144,7 +155,6 @@ fn rocket() -> rocket::Rocket {
                                 });
 
                                 println!("Room = {:?}", room);
-
                                 // Send an update to each other player
                                 for other in ws_others {
                                     send_msg(
@@ -169,26 +179,24 @@ fn rocket() -> rocket::Rocket {
                                 let mut room = rooms.get_mut(&code).unwrap();
                                 room.votes.clear();
                                 if room.questions_count > 9 {
-                                    println!("Test");
                                     for player in &room.players {
                                         send_msg(&player.ws, &GameOver)?;
                                     }
                                 } else {
+                                    let question = &questions[room.questions[room.questions_count as usize]];
                                     room.questions_count += 1;
+
+                                    use rand::seq::SliceRandom;
                                     let mut rng = rand::thread_rng();
-                                    let mut question = questions.iter().choose(&mut rng).unwrap();
-                                    while let Prompt::Tag(_, _) = question {
-                                        question = questions.iter().choose(&mut rng).unwrap();
-                                    }
-                                    if let Prompt::Question(question) = question {
-                                        for player in &room.players {
-                                            send_msg(
-                                                &player.ws,
-                                                &NewRound {
-                                                    question: question.clone(),
-                                                },
-                                            )?;
-                                        }
+                                    let mut players_rand = room.players.clone();
+                                    players_rand.shuffle(&mut rng);
+                                    for i in 0..room.players.len() {
+                                        send_msg(
+                                            &room.players[i].ws,
+                                            &NewRound {
+                                                question: question.into_client(&players_rand[i].username),
+                                            },
+                                        )?;
                                     }
                                 }
                             }
@@ -226,12 +234,15 @@ async fn index() -> NamedFile {
 }
 
 impl Room {
-    fn create() -> Room {
+    fn create<R: rand::Rng + ?Sized>(questions: &[Prompt], rng: &mut R) -> Room {
+        // Randomly choose 10 index for questions
+        let v = (0..questions.len()).choose_multiple(rng, 10);
         Room {
             code: "BOUYA123".to_string(),
             players: vec![],
             votes: vec![],
             questions_count: 0,
+            questions: v,
         }
     }
 
@@ -242,6 +253,15 @@ impl Room {
     fn record_vote(&mut self, vote: Vote) {
         if !self.votes.iter().any(|x| x.0 == vote.0) {
             self.votes.push(vote);
+        }
+    }
+}
+
+impl Prompt {
+    fn into_client<'a>(&'a self, username: &'a str) -> ClientPrompt<'a> {
+        match self {
+            Prompt::Question(s) => ClientPrompt::Question(&s),
+            Prompt::Tag(s, v) => ClientPrompt::Tag(&s, username, v.iter().map(|x| (x.0.as_str(), x.1.as_str(), x.2.as_str())).collect())
         }
     }
 }

@@ -88,7 +88,7 @@ const avatars = [
 let game = ''
 let name = ''
 let players = []
-let question = 'Si tu vois ça c\'est que ça bug, retourne à l\'accueil'
+let question = { tag: 'Question', prompt: 'Si tu vois ça c\'est que ça bug, retourne à l\'accueil' }
 let avatar = avatars[0]
 let readyCounter = 0
 let answers = []
@@ -119,7 +119,11 @@ socket.addEventListener('message', event => {
             question = data.question
             answered = false
             readyCounter = 0
-            m.route.set('/question')
+            if (question.tag === 'Question') {
+                m.route.set('/question')
+            } else {
+                m.route.set('/tag')
+            }
             break
         case 'RoundUpdate':
             readyCounter = data.ready_player_count
@@ -127,20 +131,33 @@ socket.addEventListener('message', event => {
             break
         case 'RoundOver':
             answers = []
-            for (const vote of data.votes) {
-                let idx = answers.findIndex(x => x.username == vote[1])
-                if (idx == -1) {
-                    answers.push({
-                        username: vote[1],
-                        avatar: players.find(x => x.username == vote[1]).avatar,
-                        votes: 0
-                    })
-                    idx = answers.length - 1
+            if (question.tag == 'Question') {
+                for (const vote of data.votes) {
+                    let idx = answers.findIndex(x => x.username == vote[1])
+                    if (idx == -1) {
+                        answers.push({
+                            username: vote[1],
+                            avatar: players.find(x => x.username == vote[1]).avatar,
+                            votes: 0
+                        })
+                        idx = answers.length - 1
+                    }
+                    answers[idx].votes += 1
                 }
-                answers[idx].votes += 1
+                answers.sort((a, b) => b.votes - a.votes)
+                m.route.set('/result')
+            } else {
+                answers = data.votes.map(vote => {
+                    return {
+                        username: vote[0],
+                        avatar: players.find(x => x.username == vote[0]).avatar,
+                        result: vote[1],
+                        img: question.prompt[1],
+                        imgCredits: question.prompt[2]
+                    }
+                })
+                m.route.set('/tag-result')
             }
-            answers.sort((a, b) => a.votes - b.votes)
-            m.route.set('/result')
             break
         case 'GameOver':
             m.route('/home')
@@ -232,7 +249,7 @@ const LobbyLGBT = {
 const Question = {
     view: () => m('main', {}, [
         showConnectionState(),
-        m('h2', {}, question),
+        m('h2', {}, question.prompt),
         m('h3', {}, `${readyCounter} / ${players.length} réponses`),
         m('section', { className: 'choices' }, players.map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
             send({
@@ -244,6 +261,25 @@ const Question = {
         } }, [
             m('img', { className: 'avatar', src: `/static/avatars/${x.avatar}.png` }),
             m('p', {}, x.username)
+        ])))
+    ])
+}
+
+const Tag = {
+    view: () => m('main', {}, [
+        showConnectionState(),
+        m('h2', {}, `${question.prompt[0]} correspond le mieux à ${question.prompt[1]}`),
+        m('h3', {}, `${readyCounter} / ${players.length} réponses`),
+        m('section', { className: 'choices' }, question.prompt[2].map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
+            send({
+                tag: 'Answer',
+                code: game,
+                vote: [question.prompt[1], x[0]]
+            })
+            answered = true
+        } }, [
+            m('div', { className: 'tag-img', style: `background-image: url('/static/images/${x[1]}')`, title: `Photo : ${x[2]}` }),
+            m('p', {}, x[0])
         ])))
     ])
 }
@@ -269,9 +305,35 @@ const Result = {
     ])
 }
 
+
+
+const TagResult = {
+    view: () => m('main', {}, [
+        showConnectionState(),
+        m('h2', {}, 'Résultats'),
+        m('h3', {}, `${question.prompt[0]} correspond le mieux à…`),
+        m('section', {}, answers.map((a, i) =>
+            m('div', { className: 'result' }, [
+                m('img', { className: 'avatar', src: `/static/avatars/${a.avatar}.png` }),
+                m('p', {}, a.username),
+                m('p', {}, a.result),
+                m('div', { className: 'tag-img', style: `background-image: url('/static/images/${a.img}')`, title: `Photo : ${a.imgCredits}` }),
+            ])
+        )),
+        name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
+            send({
+                tag: 'StartRound',
+                code: game
+            })
+        } }, 'Question suivante') : null
+    ])
+}
+
 m.route(document.getElementById('app'), '/home', {
     '/home': Home,
     '/lobby': LobbyLGBT,
     '/question': Question,
     '/result': Result,
+    '/tag': Tag,
+    '/tag-result': TagResult,
 })
