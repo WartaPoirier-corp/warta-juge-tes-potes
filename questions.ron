@@ -62,4 +62,9 @@
     ]),
     Question("Qui serait assez maladroit⋅e pour laisser s'échapper un virus ultra dangereux d'un laboratoire ?"),
     Question("Qui commencerait à halluciner après une nuit blanche ?"),
+    Question("Qui pourrait se perdre dans son quartier ?"),
+    Question("Qui est un⋅e sugar daddy⋅mommy ?"),
+    Question("Qui est un⋅e sugar baby ?"),
+    Question("Qui gagnerait les Hunger Games ?"),
+    Question("Qui posterait un selfie alors qu'il y a une catastrophe naturelle ?"),
 ]

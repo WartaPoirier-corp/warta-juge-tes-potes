@@ -3,8 +3,8 @@ const CONNECTED = 1
 const DISCONNECTED = 2
 let connectionState = CONNECTING
 
-const protocol = location.protocol === 'http:' ? 'ws' : 'wss'
-const socket = new WebSocket(`${protocol}://${location.hostname}:8008`)
+const production = location.protocol === 'https:'
+const socket = new WebSocket(production ? `wss://${location.hostname}/ws` : `ws://${location.hostname}:8008/`)
 
 socket.addEventListener('error', _ => {
     connectionState = DISCONNECTED
