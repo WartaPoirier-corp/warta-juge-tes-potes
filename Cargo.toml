@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 rocket = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "8d4d01106e2e10b08100805d40bfa19a7357e900" }
 rocket_contrib = { git = "https://github.com/SergioBenitez/Rocket.git", rev = "8d4d01106e2e10b08100805d40bfa19a7357e900" }
+itertools = "0.10"
 # tokio-tungstenite = "0.14.0"
 tokio = { version = "1.4.0", features = ["macros"] }
 ws = "0.9"

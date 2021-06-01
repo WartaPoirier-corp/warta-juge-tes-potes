@@ -1,10 +1,14 @@
 #[macro_use]
 extern crate rocket;
+
+pub mod id_gen;
+
+use rand::seq::IteratorRandom;
 use rocket::response::NamedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
-use rand::seq::IteratorRandom;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -98,7 +102,22 @@ fn rocket() -> rocket::Rocket {
             rocket_contrib::serve::StaticFiles::from("static"),
         )
         .attach(rocket::fairing::AdHoc::on_launch("WebSocket", |_| {
-            std::thread::spawn(|| {
+            let funny_words: &'static _ = {
+                let file = BufReader::new(
+                    std::fs::File::open("funny_words.txt").expect("missing funny_words.txt"),
+                );
+
+                let funny_words: Box<id_gen::FunnyWords> = Box::new(
+                    file.lines()
+                        .filter_map(|l| l.ok())
+                        .filter(|line| !line.is_empty())
+                        .collect(),
+                );
+
+                Box::leak(funny_words)
+            };
+
+            std::thread::spawn(move || {
                 ws::listen("0.0.0.0:8008", |out| {
                     move |msg| {
                         use ClientEvent::*;
@@ -106,7 +125,7 @@ fn rocket() -> rocket::Rocket {
 
                         // TODO: c pa opti
                         let content = std::fs::read_to_string("questions.ron").unwrap();
-                        let questions : Vec<Prompt> = ron::from_str(&content).unwrap();
+                        let questions: Vec<Prompt> = ron::from_str(&content).unwrap();
 
                         let msg = match msg {
                             ws::Message::Text(s) => s,
@@ -115,12 +134,26 @@ fn rocket() -> rocket::Rocket {
                         let evt: ClientEvent = serde_json::from_str(&msg).unwrap();
                         match evt {
                             CreateRoom => {
-                                let room = Room::create();
+                                let mut rooms = ROOMS.lock().unwrap();
+
+                                let code = loop {
+                                    let chain =
+                                        id_gen::Chain::new(funny_words, 0.1, rand::thread_rng());
+
+                                    let code = chain.take(8).collect::<String>();
+
+                                    if !rooms.contains_key(&code) {
+                                        break code;
+                                    }
+                                };
+
+                                let room = Room::create(code);
+
                                 let res = RoomCreated {
                                     code: room.code.clone(),
                                 };
 
-                                ROOMS.lock().unwrap().insert(room.code.clone(), room);
+                                rooms.insert(room.code.clone(), room);
 
                                 send_msg(&out, &res)?;
                             }
@@ -226,9 +259,9 @@ async fn index() -> NamedFile {
 }
 
 impl Room {
-    fn create() -> Room {
+    fn create(code: String) -> Room {
         Room {
-            code: "BOUYA123".to_string(),
+            code,
             players: vec![],
             votes: vec![],
             questions_count: 0,
