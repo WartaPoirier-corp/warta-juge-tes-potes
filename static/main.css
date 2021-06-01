@@ -5,11 +5,15 @@
     margin: 0;
 }
 
+html {
+    background: linear-gradient(#131316 0, #1D1C21 120vh);
+}
+
 body {
     font-family: 'Pangolin', cursive;
-    background: linear-gradient(#131316 0, #1D1C21 100vh);
     background-attachment: fixed;
     color: #F8FFF4;
+    padding-bottom: 2em;
 }
 
 header {
@@ -170,4 +174,19 @@ h3 {
 
 .choices > * {
     flex: 1;
+}
+
+.tag-img {
+    width: 8em;
+    height: 8em;
+    background-position: center;
+    background-size: cover;
+    margin: 1em auto;
+    border-radius: 4px;
+}
+
+@media (orientation: portrait) {
+    .result .tag-img {
+        display: none;
+    }
 }
