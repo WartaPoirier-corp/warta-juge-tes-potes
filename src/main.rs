@@ -1,10 +1,14 @@
 #[macro_use]
 extern crate rocket;
+
+pub mod id_gen;
+
+use rand::seq::IteratorRandom;
 use rocket::response::NamedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
-use rand::seq::IteratorRandom;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -24,7 +28,7 @@ enum Prompt {
 #[serde(tag = "tag", content = "prompt")]
 enum ClientPrompt<'a> {
     Question(&'a str),
-    Tag(&'a str, &'a str, Vec<(&'a str, &'a str, &'a str)>)
+    Tag(&'a str, &'a str, Vec<(&'a str, &'a str, &'a str)>),
 }
 
 // For a question : First username = Player who voted, second username = Choice
@@ -108,7 +112,22 @@ fn rocket() -> rocket::Rocket {
             rocket_contrib::serve::StaticFiles::from("static"),
         )
         .attach(rocket::fairing::AdHoc::on_launch("WebSocket", |_| {
-            std::thread::spawn(|| {
+            let funny_words: &'static _ = {
+                let file = BufReader::new(
+                    std::fs::File::open("funny_words.txt").expect("missing funny_words.txt"),
+                );
+
+                let funny_words: Box<id_gen::FunnyWords> = Box::new(
+                    file.lines()
+                        .filter_map(|l| l.ok())
+                        .filter(|line| !line.is_empty())
+                        .collect(),
+                );
+
+                Box::leak(funny_words)
+            };
+
+            std::thread::spawn(move || {
                 ws::listen("0.0.0.0:8008", |out| {
                     move |msg| {
                         use ClientEvent::*;
@@ -116,7 +135,7 @@ fn rocket() -> rocket::Rocket {
 
                         // TODO: c pa opti
                         let content = std::fs::read_to_string("questions.ron").unwrap();
-                        let questions : Vec<Prompt> = ron::from_str(&content).unwrap();
+                        let questions: Vec<Prompt> = ron::from_str(&content).unwrap();
 
                         let msg = match msg {
                             ws::Message::Text(s) => s,
@@ -125,13 +144,27 @@ fn rocket() -> rocket::Rocket {
                         let evt: ClientEvent = serde_json::from_str(&msg).unwrap();
                         match evt {
                             CreateRoom => {
+                                let mut rooms = ROOMS.lock().unwrap();
+
+                                let code = loop {
+                                    let chain =
+                                        id_gen::Chain::new(funny_words, 0.1, rand::thread_rng());
+
+                                    let code = chain.take(8).collect::<String>();
+
+                                    if !rooms.contains_key(&code) {
+                                        break code;
+                                    }
+                                };
+
                                 let mut rng = rand::thread_rng();
-                                let room = Room::create(&questions, &mut rng);
+                                let room = Room::create(code, &questions, &mut rng);
+
                                 let res = RoomCreated {
                                     code: room.code.clone(),
                                 };
 
-                                ROOMS.lock().unwrap().insert(room.code.clone(), room);
+                                rooms.insert(room.code.clone(), room);
 
                                 send_msg(&out, &res)?;
                             }
@@ -155,6 +188,7 @@ fn rocket() -> rocket::Rocket {
                                 });
 
                                 println!("Room = {:?}", room);
+
                                 // Send an update to each other player
                                 for other in ws_others {
                                     send_msg(
@@ -183,7 +217,8 @@ fn rocket() -> rocket::Rocket {
                                         send_msg(&player.ws, &GameOver)?;
                                     }
                                 } else {
-                                    let question = &questions[room.questions[room.questions_count as usize]];
+                                    let question =
+                                        &questions[room.questions[room.questions_count as usize]];
                                     room.questions_count += 1;
 
                                     use rand::seq::SliceRandom;
@@ -194,7 +229,8 @@ fn rocket() -> rocket::Rocket {
                                         send_msg(
                                             &room.players[i].ws,
                                             &NewRound {
-                                                question: question.into_client(&players_rand[i].username),
+                                                question: question
+                                                    .into_client(&players_rand[i].username),
                                             },
                                         )?;
                                     }
@@ -234,11 +270,11 @@ async fn index() -> NamedFile {
 }
 
 impl Room {
-    fn create<R: rand::Rng + ?Sized>(questions: &[Prompt], rng: &mut R) -> Room {
+    fn create<R: rand::Rng + ?Sized>(code: String, questions: &[Prompt], rng: &mut R) -> Room {
         // Randomly choose 10 index for questions
         let v = (0..questions.len()).choose_multiple(rng, 10);
         Room {
-            code: "BOUYA123".to_string(),
+            code,
             players: vec![],
             votes: vec![],
             questions_count: 0,
@@ -261,7 +297,13 @@ impl Prompt {
     fn into_client<'a>(&'a self, username: &'a str) -> ClientPrompt<'a> {
         match self {
             Prompt::Question(s) => ClientPrompt::Question(&s),
-            Prompt::Tag(s, v) => ClientPrompt::Tag(&s, username, v.iter().map(|x| (x.0.as_str(), x.1.as_str(), x.2.as_str())).collect())
+            Prompt::Tag(s, v) => ClientPrompt::Tag(
+                &s,
+                username,
+                v.iter()
+                    .map(|x| (x.0.as_str(), x.1.as_str(), x.2.as_str()))
+                    .collect(),
+            ),
         }
     }
 }
