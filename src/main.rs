@@ -27,6 +27,12 @@ enum ClientPrompt<'a> {
     Tag(&'a str, &'a str, Vec<(&'a str, &'a str, &'a str)>)
 }
 
+#[derive(Serialize)]
+enum ErrorMsg {
+    UsedUsername,
+    RoomNotFound,
+}
+
 // For a question : First username = Player who voted, second username = Choice
 // For a Tag : First username = Player who voted, second username = Choice
 type Vote = (Username, Username);
@@ -68,6 +74,9 @@ enum ServerEvent<'a> {
     /// When Server tells Clients that the round is over (the time is over / everyone responded)
     RoundOver {
         votes: Vec<Vote>,
+    },
+    Error {
+        code: ErrorMsg,
     },
     GameOver,
 }
@@ -115,14 +124,18 @@ fn rocket() -> rocket::Rocket {
                         use ServerEvent::*;
 
                         // TODO: c pa opti
-                        let content = std::fs::read_to_string("questions.ron").unwrap();
-                        let questions : Vec<Prompt> = ron::from_str(&content).unwrap();
+                        let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
+                        let questions : Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
 
                         let msg = match msg {
                             ws::Message::Text(s) => s,
                             _ => unreachable!(),
                         };
-                        let evt: ClientEvent = serde_json::from_str(&msg).unwrap();
+                        let evt: ClientEvent = match serde_json::from_str(&msg) {
+                            Ok(msg) => msg,
+                            _ => return Ok(()),
+                        };
+
                         match evt {
                             CreateRoom => {
                                 let mut rng = rand::thread_rng();
@@ -142,11 +155,30 @@ fn rocket() -> rocket::Rocket {
                             } => {
                                 // Get the room of given code
                                 let mut rooms = ROOMS.lock().unwrap();
-                                let room = rooms.get_mut(&code).unwrap();
+                                let room = match rooms.get_mut(&code) {
+                                    Some(room) => room,
+                                    None => return send_msg(
+                                        &out,
+                                        &Error {
+                                            code: ErrorMsg::RoomNotFound,
+                                        },
+                                    ),
+                                };
 
+                                // Ensure the username is not already used
+                                if room.players.iter().any(|x| x.username == username) {
+                                    send_msg(
+                                        &out,
+                                        &Error {
+                                            code: ErrorMsg::UsedUsername,
+                                        },
+                                    )?;
+
+                                    return Ok(());
+                                }
                                 // Fetch the websocket Sender element for each player, in order to send a RoomUpdate event
                                 let ws_others = room.players.clone().into_iter().map(|x| x.ws);
-
+                                
                                 // Add the player to the room
                                 room.join(Player {
                                     username,
@@ -176,7 +208,15 @@ fn rocket() -> rocket::Rocket {
                                 // Get the room of given code
 
                                 let mut rooms = ROOMS.lock().unwrap();
-                                let mut room = rooms.get_mut(&code).unwrap();
+                                let mut room = match rooms.get_mut(&code) {
+                                    Some(room) => room,
+                                    None => return send_msg(
+                                        &out,
+                                        &Error {
+                                            code: ErrorMsg::RoomNotFound,
+                                        },
+                                    ),
+                                };
                                 room.votes.clear();
                                 if room.questions_count > 9 {
                                     for player in &room.players {
@@ -202,7 +242,16 @@ fn rocket() -> rocket::Rocket {
                             }
                             Answer { code, vote } => {
                                 let mut rooms = ROOMS.lock().unwrap();
-                                let room = rooms.get_mut(&code).unwrap();
+                                let room = match rooms.get_mut(&code) {
+                                    Some(room) => room,
+                                    None => return send_msg(
+                                        &out,
+                                        &Error {
+                                            code: ErrorMsg::RoomNotFound,
+                                        },
+                                    ),
+                                };
+
                                 room.record_vote(vote);
                                 let res = if room.votes.len() < room.players.len() {
                                     RoundUpdate {
@@ -229,8 +278,8 @@ fn rocket() -> rocket::Rocket {
 }
 
 #[get("/")]
-async fn index() -> NamedFile {
-    NamedFile::open("static/index.html").await.unwrap()
+async fn index() -> Option<NamedFile> {
+    NamedFile::open("static/index.html").await.ok()
 }
 
 impl Room {

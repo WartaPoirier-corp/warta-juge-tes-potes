@@ -116,22 +116,22 @@ section {
     transform: scale(1.1);
 }
 
-.warning {
+.popup {
     text-align: center;
     font-weight: bold;
-    background: rgba(255, 0, 0, 0.2);
     padding: 1em;
+    border-radius: 4px;
+    position: fixed;
+}
+
+.warning {
+    background: rgba(255, 0, 0, 0.2);
     color: red;
-    border-radius: 4px; 
 }
 
 .info {
-    text-align: center;
-    font-weight: bold;
     background: rgba(107, 163, 104, 0.2);
-    padding: 1em;
     color: #6BA368;
-    border-radius: 4px; 
 }
 
 .result {
