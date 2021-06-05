@@ -8,10 +8,12 @@ const socket = new WebSocket(production ? `wss://${location.hostname}/ws` : `ws:
 
 socket.addEventListener('error', _ => {
     connectionState = DISCONNECTED
+    errorMessage = 'T\'es hors ligne'
     m.redraw()
 })
 socket.addEventListener('open', _ => {
     connectionState = CONNECTED
+    errorMessage = null
     m.redraw()
 })
 
@@ -93,6 +95,12 @@ let avatar = avatars[0]
 let readyCounter = 0
 let answers = []
 let answered = false
+let errorMessage = ''
+
+const errors = {
+    'UsedUsername': 'Ce pseudo est déjà pris',
+    'RoomNotFound': 'Cette partie n\'existe pas',
+}
 
 socket.addEventListener('message', event => {
     const data = JSON.parse(event.data)
@@ -161,6 +169,11 @@ socket.addEventListener('message', event => {
             break
         case 'GameOver':
             m.route('/home')
+        case 'Error':
+            errorMessage = errors[data.code]
+            window.setTimeout(() => {
+                errorMessage = null
+            }, 5000)
         default:
             console.log('Unknown message', data)
             break
@@ -169,9 +182,9 @@ socket.addEventListener('message', event => {
 
 const showConnectionState = () => {
     if (connectionState == DISCONNECTED) {
-        return m('div', { className: 'warning' }, 'T\'es hors ligne')
+        return m('div', { className: 'popup warning' }, 'T\'es hors ligne')
     } else if (connectionState == CONNECTING) {
-        return m('div', { className: 'info' }, 'Connection en cours…')
+        return m('div', { className: 'popup info' }, 'Connection en cours…')
     } else {
         return null
     }
@@ -200,7 +213,7 @@ const Home = {
             ]),
             m('section', {}, [
                 m('h2', {}, 'Créer une partie'),
-                m('p', {}, 'Creéz une partie depuis un ordinateur (ou autre grand écran que tout le monde peut voir). Vous pourrez ensuite la rejoindre avec vos téléphones.'),
+                m('p', {}, 'Crée une partie et envoie le code à tes amis'),
                 m('a', { className: 'button', onclick: () => {
                     name = document.getElementById('username').value
                     send({
@@ -210,7 +223,7 @@ const Home = {
             ]),
             m('section', {}, [
                 m('h2', {}, 'Rejoindre une partie'),
-                m('p', {}, 'Entrez le code de la partie qui s\'affiche sur le grand écran.'),
+                m('p', {}, 'Rentre le code d\'une partie déjà créé pour la rejoindre'),
                 m('input', { id: 'code' }),
                 m('a', { className: 'button', href: '#', onclick: () => {
                     game = document.getElementById('code').value
