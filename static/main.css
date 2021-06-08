@@ -122,10 +122,13 @@ section {
     padding: 1em;
     border-radius: 4px;
     position: fixed;
+    left: 10vw;
+    right: 10vw;
+    top: 5vh;
 }
 
 .warning {
-    background: rgba(255, 0, 0, 0.2);
+    background: #441113;
     color: red;
 }
 
@@ -156,9 +159,12 @@ section {
     }
 }
 
+.result p {
+    margin: 0 1em;
+}
+
 .result p:first-of-type {
     flex: 1;
-    margin: 0 1em;
     font-size: 1.5em;
 }
 

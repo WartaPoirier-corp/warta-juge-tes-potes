@@ -17,7 +17,10 @@ socket.addEventListener('open', _ => {
     m.redraw()
 })
 
-const send = msg => socket.send(JSON.stringify(msg))
+const send = msg => {
+    console.log("Sending :", msg)
+    socket.send(JSON.stringify(msg))
+}
 
 const avatars = [
     '14571e81fa5ce366eb09d6b3cbadea53',
@@ -96,6 +99,7 @@ let readyCounter = 0
 let answers = []
 let answered = false
 let errorMessage = ''
+let questionCounter = 0
 
 const errors = {
     'UsedUsername': 'Ce pseudo est déjà pris',
@@ -117,6 +121,7 @@ socket.addEventListener('message', event => {
             break
         case 'OnRoomJoin':
             players = data.players
+            questionCounter = 0
             m.route.set('/lobby')
             break
         case 'RoomUpdate':
@@ -127,6 +132,7 @@ socket.addEventListener('message', event => {
             question = data.question
             answered = false
             readyCounter = 0
+            questionCounter += 1
             if (question.tag === 'Question') {
                 m.route.set('/question')
             } else {
@@ -156,24 +162,27 @@ socket.addEventListener('message', event => {
                 m.route.set('/result')
             } else {
                 answers = data.votes.map(vote => {
+                    const choice = question.prompt[2].find(x => x[0] == vote[1])
                     return {
                         username: vote[0],
                         avatar: players.find(x => x.username == vote[0]).avatar,
                         result: vote[1],
-                        img: question.prompt[1],
-                        imgCredits: question.prompt[2]
+                        img: choice[1],
+                        imgCredits: choice[2]
                     }
                 })
                 m.route.set('/tag-result')
             }
             break
         case 'GameOver':
-            m.route('/home')
+            m.route.set('/end')
+            break
         case 'Error':
             errorMessage = errors[data.code]
             window.setTimeout(() => {
                 errorMessage = null
             }, 5000)
+            break
         default:
             console.log('Unknown message', data)
             break
@@ -263,6 +272,7 @@ const Question = {
     view: () => m('main', {}, [
         showConnectionState(),
         m('h2', {}, question.prompt),
+        m('h3', {}, `Question ${questionCounter} / 10`),
         m('h3', {}, `${readyCounter} / ${players.length} réponses`),
         m('section', { className: 'choices' }, players.map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
             send({
@@ -282,6 +292,7 @@ const Tag = {
     view: () => m('main', {}, [
         showConnectionState(),
         m('h2', {}, `${question.prompt[0]} correspond le mieux à ${question.prompt[1]}`),
+        m('h3', {}, `Question ${questionCounter} / 10`),
         m('h3', {}, `${readyCounter} / ${players.length} réponses`),
         m('section', { className: 'choices' }, question.prompt[2].map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
             send({
@@ -302,6 +313,7 @@ const Result = {
         showConnectionState(),
         m('h2', {}, 'Résultats'),
         m('h3', {}, question),
+        m('h3', {}, `Question ${questionCounter} / 10`),
         m('section', {}, answers.map((a, i) =>
             m('div', { className: 'result', style: `--percent: ${a.votes / players.length * 100}%; animation-delay: ${i * 0.2}s;` }, [
                 m('img', { className: 'avatar', src: `/static/avatars/${a.avatar}.png` }),
@@ -325,6 +337,7 @@ const TagResult = {
         showConnectionState(),
         m('h2', {}, 'Résultats'),
         m('h3', {}, `${question.prompt[0]} correspond le mieux à…`),
+        m('h3', {}, `Question ${questionCounter} / 10`),
         m('section', {}, answers.map((a, i) =>
             m('div', { className: 'result' }, [
                 m('img', { className: 'avatar', src: `/static/avatars/${a.avatar}.png` }),
@@ -342,6 +355,22 @@ const TagResult = {
     ])
 }
 
+const End = {
+    view: () => m('main', {}, [
+        showConnectionState(),
+        m('h2', {}, 'C\'est la fin'),
+        m('a', { className: 'button', href: '#', onclick: () => {
+            m.route.set('/home')
+        } }, 'Retourner à l\'accueil'),
+        name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
+            send({
+                tag: 'StartGame',
+                code: game
+            })
+        } }, 'Refaire une partie avec les mêmes personnes') : null
+    ])
+}
+
 m.route(document.getElementById('app'), '/home', {
     '/home': Home,
     '/lobby': LobbyLGBT,
@@ -349,4 +378,6 @@ m.route(document.getElementById('app'), '/home', {
     '/result': Result,
     '/tag': Tag,
     '/tag-result': TagResult,
+    '/end': End,
 })
+document.addEventListener('DOMContentLoaded', () => m.route.set('/home'))

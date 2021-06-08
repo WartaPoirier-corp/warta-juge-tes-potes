@@ -146,6 +146,11 @@ fn rocket() -> rocket::Rocket {
                         let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
                         let questions : Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
 
+                        println!("Read {} questions ({} tags)", questions.len(), questions.iter().filter(|x| match x {
+                            Prompt::Tag(_, _) => true,
+                            _ => false,
+                        }).count());
+
                         let msg = match msg {
                             ws::Message::Text(s) => s,
                             _ => unreachable!(),
