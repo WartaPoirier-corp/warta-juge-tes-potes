@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
+use rand::thread_rng;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -176,7 +177,7 @@ fn rocket() -> rocket::Rocket {
                                 };
 
                                 let mut rng = rand::thread_rng();
-                                let room = Room::create(code, &questions, &mut rng);
+                                let room = Room::create(code, &questions);
 
                                 let res = RoomCreated {
                                     code: room.code.clone(),
@@ -257,11 +258,13 @@ fn rocket() -> rocket::Rocket {
                                     ),
                                 };
                                 room.votes.clear();
-                                if room.questions_count > 9 {
+                                if room.questions_count >= 10 {
                                     for player in &room.players {
                                         send_msg(&player.ws, &GameOver)?;
                                     }
-                                } else {
+                                    room.reset(&questions);
+                                }  else {
+
                                     let question =
                                         &questions[room.questions[room.questions_count as usize]];
                                     room.questions_count += 1;
@@ -269,7 +272,10 @@ fn rocket() -> rocket::Rocket {
                                     use rand::seq::SliceRandom;
                                     let mut rng = rand::thread_rng();
                                     let mut players_rand = room.players.clone();
-                                    players_rand.shuffle(&mut rng);
+                                    // While there is a player that will need to tag himself
+                                    while players_rand.iter().enumerate().any(|(i,x)| x.username == room.players[i].username) {
+                                        players_rand.shuffle(&mut rng);
+                                    }
                                     for i in 0..room.players.len() {
                                         send_msg(
                                             &room.players[i].ws,
@@ -324,9 +330,10 @@ async fn index() -> Option<NamedFile> {
 }
 
 impl Room {
-    fn create<R: rand::Rng + ?Sized>(code: String, questions: &[Prompt], rng: &mut R) -> Room {
+    fn create(code: String, questions: &[Prompt]) -> Room {
+        let mut rng = rand::thread_rng();
         // Randomly choose 10 index for questions
-        let v = (0..questions.len()).choose_multiple(rng, 10);
+        let v = (0..questions.len()).choose_multiple(&mut rng, 10);
         Room {
             code,
             players: vec![],
@@ -334,6 +341,12 @@ impl Room {
             questions_count: 0,
             questions: v,
         }
+    }
+    fn reset(&mut self, questions: &[Prompt]) {
+        let mut rng = rand::thread_rng();
+        self.questions = (0..questions.len()).choose_multiple(&mut rng, 10);
+        self.votes.clear();
+        self.questions_count = 0;
     }
 
     fn join(&mut self, player: Player) {

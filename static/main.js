@@ -359,15 +359,16 @@ const End = {
     view: () => m('main', {}, [
         showConnectionState(),
         m('h2', {}, 'C\'est la fin'),
-        m('a', { className: 'button', href: '#', onclick: () => {
+        m('section', {},
+        [m('a', { className: 'button', href: '#', onclick: () => {
             m.route.set('/home')
         } }, 'Retourner à l\'accueil'),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
             send({
-                tag: 'StartGame',
+                tag: 'StartRound',
                 code: game
             })
-        } }, 'Refaire une partie avec les mêmes personnes') : null
+        } }, 'Refaire une partie avec les mêmes personnes') : null ])
     ])
 }
 
