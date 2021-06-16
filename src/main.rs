@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
-use rand::thread_rng;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -176,7 +175,6 @@ fn rocket() -> rocket::Rocket {
                                     }
                                 };
 
-                                let mut rng = rand::thread_rng();
                                 let room = Room::create(code, &questions);
 
                                 let res = RoomCreated {
@@ -272,9 +270,11 @@ fn rocket() -> rocket::Rocket {
                                     use rand::seq::SliceRandom;
                                     let mut rng = rand::thread_rng();
                                     let mut players_rand = room.players.clone();
-                                    // While there is a player that will need to tag himself
-                                    while players_rand.iter().enumerate().any(|(i,x)| x.username == room.players[i].username) {
-                                        players_rand.shuffle(&mut rng);
+                                    if room.players.len() > 1 {
+                                        // While there is a player that will need to tag himself
+                                        while players_rand.iter().enumerate().any(|(i,x)| x.username == room.players[i].username) {
+                                            players_rand.shuffle(&mut rng);
+                                        }
                                     }
                                     for i in 0..room.players.len() {
                                         send_msg(

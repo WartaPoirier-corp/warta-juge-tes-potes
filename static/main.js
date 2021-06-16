@@ -175,6 +175,7 @@ socket.addEventListener('message', event => {
             }
             break
         case 'GameOver':
+            questionCounter = 0
             m.route.set('/end')
             break
         case 'Error':
