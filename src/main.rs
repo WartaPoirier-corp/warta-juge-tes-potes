@@ -86,7 +86,7 @@ enum ServerEvent<'a> {
 
 #[derive(Deserialize)]
 #[serde(tag = "tag")]
-enum ClientEvent {
+enum ClientEventLobby {
     /***** Client *****/
     /// Client ask Server to create a room
     CreateRoom, //TODO règles
@@ -96,6 +96,11 @@ enum ClientEvent {
         avatar: String,
         code: String,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "tag")]
+enum ClientEventGame {
     /// When the admin of the room starts the game
     StartRound,
     /// When Client answers to a question
@@ -141,7 +146,6 @@ impl RoomHandler for GameRoom {
     }
 
     fn on_message(&mut self, cx: Context<Self::Guest>, msg: Message) -> ResultRelocation {
-        use ClientEvent::*;
         use ServerEvent::*;
 
         let msg = match msg {
@@ -149,13 +153,13 @@ impl RoomHandler for GameRoom {
             _ => unreachable!(),
         };
 
-        let evt: ClientEvent = match serde_json::from_str(&msg) {
+        let evt = match serde_json::from_str(&msg) {
             Ok(msg) => msg,
             _ => return Ok(None),
         };
 
         match evt {
-            StartRound => {
+            ClientEventGame::StartRound => {
                 self.votes.clear();
                 if self.questions_count > 9 {
                     cx.broadcast(&GameOver)?;
@@ -180,7 +184,7 @@ impl RoomHandler for GameRoom {
                     Ok(None)
                 }
             }
-            Answer { vote } => {
+            ClientEventGame::Answer { vote } => {
                 self.record_vote(vote);
                 let res = if self.votes.len() < self.players.len() {
                     RoundUpdate {
@@ -196,7 +200,6 @@ impl RoomHandler for GameRoom {
 
                 Ok(None)
             }
-            _ => todo!(),
         }
     }
 }
@@ -229,7 +232,6 @@ fn rocket() -> rocket::Rocket {
                 ws_hotel::listen(
                     "0.0.0.0:8008",
                     AdHoc::new(move |cx: Context<()>, msg: Message| {
-                        use ClientEvent::*;
                         use ServerEvent::*;
 
                         let msg = match msg {
@@ -237,13 +239,13 @@ fn rocket() -> rocket::Rocket {
                             _ => unreachable!(),
                         };
 
-                        let evt: ClientEvent = match serde_json::from_str(&msg) {
+                        let evt = match serde_json::from_str(&msg) {
                             Ok(msg) => msg,
                             _ => return Ok(None),
                         };
 
                         match evt {
-                            CreateRoom => {
+                            ClientEventLobby::CreateRoom => {
                                 let mut rooms = ROOMS.lock().unwrap();
 
                                 let code = loop {
@@ -268,7 +270,7 @@ fn rocket() -> rocket::Rocket {
 
                                 Ok(None)
                             }
-                            JoinRoom {
+                            ClientEventLobby::JoinRoom {
                                 username,
                                 avatar,
                                 code,
@@ -314,7 +316,6 @@ fn rocket() -> rocket::Rocket {
 
                                 Ok(Some(relocation))
                             }
-                            _ => todo!(),
                         }
                     }),
                 );
