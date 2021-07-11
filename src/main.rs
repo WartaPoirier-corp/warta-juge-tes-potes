@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
+use ws_hotel::{Message, ws};
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -43,7 +44,7 @@ type Vote = (Username, Username);
 type Username = String;
 
 #[derive(Debug)]
-struct Room {
+struct GameRoom {
     code: String,
     players: Vec<Player>,
     votes: Vec<Vote>,
@@ -104,7 +105,7 @@ enum ClientEvent {
 }
 
 lazy_static::lazy_static! {
-    static ref ROOMS: Mutex<HashMap<String, Room>> = Mutex::new(HashMap::new());
+    static ref ROOMS: Mutex<HashMap<String, GameRoom>> = Mutex::new(HashMap::new());
     static ref QUESTIONS: Vec<Prompt> = {
         // TODO: c pa opti
         let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
@@ -155,9 +156,10 @@ fn rocket() -> rocket::Rocket {
                         use ServerEvent::*;
 
                         let msg = match msg {
-                            ws::Message::Text(s) => s,
+                            Message::Text(s) => s,
                             _ => unreachable!(),
                         };
+
                         let evt: ClientEvent = match serde_json::from_str(&msg) {
                             Ok(msg) => msg,
                             _ => return Ok(()),
@@ -179,7 +181,7 @@ fn rocket() -> rocket::Rocket {
                                 };
 
                                 let mut rng = rand::thread_rng();
-                                let room = Room::create(code, &QUESTIONS, &mut rng);
+                                let room = GameRoom::create(code, &QUESTIONS, &mut rng);
 
                                 let res = RoomCreated {
                                     code: room.code.clone(),
@@ -326,11 +328,11 @@ async fn index() -> Option<NamedFile> {
     NamedFile::open("static/index.html").await.ok()
 }
 
-impl Room {
-    fn create<R: rand::Rng + ?Sized>(code: String, questions: &[Prompt], rng: &mut R) -> Room {
+impl GameRoom {
+    fn create<R: rand::Rng + ?Sized>(code: String, questions: &[Prompt], rng: &mut R) -> Self {
         // Randomly choose 10 index for questions
         let v = (0..questions.len()).choose_multiple(rng, 10);
-        Room {
+        Self {
             code,
             players: vec![],
             votes: vec![],
