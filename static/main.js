@@ -277,7 +277,6 @@ const Question = {
         m('section', { className: 'choices' }, players.map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
             send({
                 tag: 'Answer',
-                code: game,
                 vote: [name, x.username]
             })
             answered = true
@@ -297,7 +296,6 @@ const Tag = {
         m('section', { className: 'choices' }, question.prompt[2].map(x => m('a', { className: `button ${answered ? 'disabled' : ''}`, onclick: () => {
             send({
                 tag: 'Answer',
-                code: game,
                 vote: [question.prompt[1], x[0]]
             })
             answered = true
@@ -323,8 +321,7 @@ const Result = {
         )),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
             send({
-                tag: 'StartRound',
-                code: game
+                tag: 'StartRound'
             })
         } }, 'Question suivante') : null
     ])
@@ -348,8 +345,7 @@ const TagResult = {
         )),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
             send({
-                tag: 'StartRound',
-                code: game
+                tag: 'StartRound'
             })
         } }, 'Question suivante') : null
     ])
