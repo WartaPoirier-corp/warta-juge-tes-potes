@@ -120,9 +120,10 @@ lazy_static::lazy_static! {
     };
 }
 
-fn send_msg(out: &ws::Sender, msg: &ServerEvent) -> ws::Result<()> {
-    let msg = serde_json::to_string(&msg).unwrap();
-    out.send(ws::Message::Text(msg))
+impl From<&ServerEvent<'_>> for Message {
+    fn from(event: &ServerEvent<'_>) -> Self {
+        Message::Text(serde_json::to_string(event).unwrap())
+    }
 }
 
 #[rocket::launch]
@@ -189,7 +190,7 @@ fn rocket() -> rocket::Rocket {
 
                                 rooms.insert(room.code.clone(), room);
 
-                                send_msg(&out, &res)?;
+                                out.send(&res)?;
                             }
                             JoinRoom {
                                 username,
@@ -200,22 +201,16 @@ fn rocket() -> rocket::Rocket {
                                 let mut rooms = ROOMS.lock().unwrap();
                                 let room = match rooms.get_mut(&code) {
                                     Some(room) => room,
-                                    None => return send_msg(
-                                        &out,
-                                        &Error {
-                                            code: ErrorMsg::RoomNotFound,
-                                        },
-                                    ),
+                                    None => return out.send(&Error {
+                                        code: ErrorMsg::RoomNotFound,
+                                    }),
                                 };
 
                                 // Ensure the username is not already used
                                 if room.players.iter().any(|x| x.username == username) {
-                                    send_msg(
-                                        &out,
-                                        &Error {
-                                            code: ErrorMsg::UsedUsername,
-                                        },
-                                    )?;
+                                    out.send(&Error {
+                                        code: ErrorMsg::UsedUsername,
+                                    })?;
 
                                     return Ok(());
                                 }
@@ -233,20 +228,14 @@ fn rocket() -> rocket::Rocket {
 
                                 // Send an update to each other player
                                 for other in ws_others {
-                                    send_msg(
-                                        &other,
-                                        &RoomUpdate {
-                                            players: room.players.clone(),
-                                        },
-                                    )?;
+                                    other.send(&RoomUpdate {
+                                        players: room.players.clone(),
+                                    })?;
                                 }
 
-                                send_msg(
-                                    &out,
-                                    &OnRoomJoin {
-                                        players: room.players.clone(),
-                                    },
-                                )?;
+                                out.send(&OnRoomJoin {
+                                    players: room.players.clone(),
+                                })?;
                             }
                             StartRound { code } => {
                                 // Get the room of given code
@@ -254,17 +243,14 @@ fn rocket() -> rocket::Rocket {
                                 let mut rooms = ROOMS.lock().unwrap();
                                 let mut room = match rooms.get_mut(&code) {
                                     Some(room) => room,
-                                    None => return send_msg(
-                                        &out,
-                                        &Error {
-                                            code: ErrorMsg::RoomNotFound,
-                                        },
-                                    ),
+                                    None => return out.send(&Error {
+                                        code: ErrorMsg::RoomNotFound,
+                                    }),
                                 };
                                 room.votes.clear();
                                 if room.questions_count > 9 {
                                     for player in &room.players {
-                                        send_msg(&player.ws, &GameOver)?;
+                                        player.ws.send(&GameOver)?;
                                     }
                                 } else {
                                     let question =
@@ -276,13 +262,10 @@ fn rocket() -> rocket::Rocket {
                                     let mut players_rand = room.players.clone();
                                     players_rand.shuffle(&mut rng);
                                     for i in 0..room.players.len() {
-                                        send_msg(
-                                            &room.players[i].ws,
-                                            &NewRound {
-                                                question: question
-                                                    .into_client(&players_rand[i].username),
-                                            },
-                                        )?;
+                                        room.players[i].ws.send(&NewRound {
+                                            question: question
+                                                .into_client(&players_rand[i].username),
+                                        })?;
                                     }
                                 }
                             }
@@ -290,12 +273,9 @@ fn rocket() -> rocket::Rocket {
                                 let mut rooms = ROOMS.lock().unwrap();
                                 let room = match rooms.get_mut(&code) {
                                     Some(room) => room,
-                                    None => return send_msg(
-                                        &out,
-                                        &Error {
-                                            code: ErrorMsg::RoomNotFound,
-                                        },
-                                    ),
+                                    None => return out.send(&Error {
+                                        code: ErrorMsg::RoomNotFound,
+                                    }),
                                 };
 
                                 room.record_vote(vote);
@@ -310,7 +290,7 @@ fn rocket() -> rocket::Rocket {
                                 };
 
                                 for player in &room.players {
-                                    send_msg(&player.ws, &res)?;
+                                    player.ws.send(&res)?;
                                 }
                             }
                         }
