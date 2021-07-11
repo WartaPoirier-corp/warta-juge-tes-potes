@@ -104,7 +104,19 @@ enum ClientEvent {
 }
 
 lazy_static::lazy_static! {
-    static ref ROOMS: Mutex<HashMap<String,Room>> = Mutex::new(HashMap::new());
+    static ref ROOMS: Mutex<HashMap<String, Room>> = Mutex::new(HashMap::new());
+    static ref QUESTIONS: Vec<Prompt> = {
+        // TODO: c pa opti
+        let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
+        let questions: Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
+
+        println!("Read {} questions ({} tags)", questions.len(), questions.iter().filter(|x| match x {
+            Prompt::Tag(_, _) => true,
+            _ => false,
+        }).count());
+
+        questions
+    };
 }
 
 fn send_msg(out: &ws::Sender, msg: &ServerEvent) -> ws::Result<()> {
@@ -142,15 +154,6 @@ fn rocket() -> rocket::Rocket {
                         use ClientEvent::*;
                         use ServerEvent::*;
 
-                        // TODO: c pa opti
-                        let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
-                        let questions : Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
-
-                        println!("Read {} questions ({} tags)", questions.len(), questions.iter().filter(|x| match x {
-                            Prompt::Tag(_, _) => true,
-                            _ => false,
-                        }).count());
-
                         let msg = match msg {
                             ws::Message::Text(s) => s,
                             _ => unreachable!(),
@@ -176,7 +179,7 @@ fn rocket() -> rocket::Rocket {
                                 };
 
                                 let mut rng = rand::thread_rng();
-                                let room = Room::create(code, &questions, &mut rng);
+                                let room = Room::create(code, &QUESTIONS, &mut rng);
 
                                 let res = RoomCreated {
                                     code: room.code.clone(),
@@ -263,7 +266,7 @@ fn rocket() -> rocket::Rocket {
                                     }
                                 } else {
                                     let question =
-                                        &questions[room.questions[room.questions_count as usize]];
+                                        &QUESTIONS[room.questions[room.questions_count as usize]];
                                     room.questions_count += 1;
 
                                     use rand::seq::SliceRandom;
