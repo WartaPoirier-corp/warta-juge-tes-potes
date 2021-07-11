@@ -9,14 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
-use ws_hotel::{Message, ws};
+use ws_hotel::{AdHoc, Context, Message, Relocation, ResultRelocation, Room, RoomHandler};
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
     username: String,
     avatar: String,
-    #[serde(skip)]
-    ws: ws::Sender,
 }
 
 #[derive(Deserialize)]
@@ -99,13 +97,13 @@ enum ClientEvent {
         code: String,
     },
     /// When the admin of the room starts the game
-    StartRound { code: String },
+    StartRound,
     /// When Client answers to a question
-    Answer { code: String, vote: Vote },
+    Answer { vote: Vote },
 }
 
 lazy_static::lazy_static! {
-    static ref ROOMS: Mutex<HashMap<String, GameRoom>> = Mutex::new(HashMap::new());
+    static ref ROOMS: Mutex<HashMap<String, Room<GameRoom>>> = Mutex::new(HashMap::new());
     static ref QUESTIONS: Vec<Prompt> = {
         // TODO: c pa opti
         let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
@@ -123,6 +121,83 @@ lazy_static::lazy_static! {
 impl From<&ServerEvent<'_>> for Message {
     fn from(event: &ServerEvent<'_>) -> Self {
         Message::Text(serde_json::to_string(event).unwrap())
+    }
+}
+
+impl RoomHandler for GameRoom {
+    type Guest = String;
+
+    fn on_join(&mut self, cx: Context<Self::Guest>) -> ResultRelocation {
+        // Send an update to each other player
+        cx.broadcast(&ServerEvent::RoomUpdate {
+            players: self.players.clone(),
+        })?;
+
+        cx.send(&ServerEvent::OnRoomJoin {
+            players: self.players.clone(),
+        })?;
+
+        Ok(None)
+    }
+
+    fn on_message(&mut self, cx: Context<Self::Guest>, msg: Message) -> ResultRelocation {
+        use ClientEvent::*;
+        use ServerEvent::*;
+
+        let msg = match msg {
+            Message::Text(s) => s,
+            _ => unreachable!(),
+        };
+
+        let evt: ClientEvent = match serde_json::from_str(&msg) {
+            Ok(msg) => msg,
+            _ => return Ok(None),
+        };
+
+        match evt {
+            StartRound => {
+                self.votes.clear();
+                if self.questions_count > 9 {
+                    cx.broadcast(&GameOver)?;
+
+                    Ok(None)
+                } else {
+                    let question = &QUESTIONS[self.questions[self.questions_count as usize]];
+                    self.questions_count += 1;
+
+                    use rand::seq::SliceRandom;
+                    let mut rng = rand::thread_rng();
+                    let mut players_rand = self.players.clone();
+                    players_rand.shuffle(&mut rng);
+                    let mut players_rand = players_rand.into_iter();
+
+                    cx.broadcast_with(|_| {
+                        Message::from(&NewRound {
+                            question: question.into_client(&players_rand.next().unwrap().username),
+                        })
+                    })?;
+
+                    Ok(None)
+                }
+            }
+            Answer { vote } => {
+                self.record_vote(vote);
+                let res = if self.votes.len() < self.players.len() {
+                    RoundUpdate {
+                        ready_player_count: self.votes.len() as u32,
+                    }
+                } else {
+                    RoundOver {
+                        votes: self.votes.clone(),
+                    }
+                };
+
+                cx.broadcast(&res)?;
+
+                Ok(None)
+            }
+            _ => todo!(),
+        }
     }
 }
 
@@ -151,8 +226,9 @@ fn rocket() -> rocket::Rocket {
             };
 
             std::thread::spawn(move || {
-                ws::listen("0.0.0.0:8008", |out| {
-                    move |msg| {
+                ws_hotel::listen(
+                    "0.0.0.0:8008",
+                    AdHoc::new(move |cx: Context<()>, msg: Message| {
                         use ClientEvent::*;
                         use ServerEvent::*;
 
@@ -163,7 +239,7 @@ fn rocket() -> rocket::Rocket {
 
                         let evt: ClientEvent = match serde_json::from_str(&msg) {
                             Ok(msg) => msg,
-                            _ => return Ok(()),
+                            _ => return Ok(None),
                         };
 
                         match evt {
@@ -184,13 +260,13 @@ fn rocket() -> rocket::Rocket {
                                 let mut rng = rand::thread_rng();
                                 let room = GameRoom::create(code, &QUESTIONS, &mut rng);
 
-                                let res = RoomCreated {
-                                    code: room.code.clone(),
-                                };
+                                let code = room.code.clone();
 
-                                rooms.insert(room.code.clone(), room);
+                                rooms.insert(room.code.clone(), Room::new(room));
 
-                                out.send(&res)?;
+                                cx.send(&RoomCreated { code })?;
+
+                                Ok(None)
                             }
                             JoinRoom {
                                 username,
@@ -201,104 +277,47 @@ fn rocket() -> rocket::Rocket {
                                 let mut rooms = ROOMS.lock().unwrap();
                                 let room = match rooms.get_mut(&code) {
                                     Some(room) => room,
-                                    None => return out.send(&Error {
-                                        code: ErrorMsg::RoomNotFound,
-                                    }),
+                                    None => {
+                                        cx.send(&Error {
+                                            code: ErrorMsg::RoomNotFound,
+                                        })?;
+
+                                        return Ok(None);
+                                    }
                                 };
 
                                 // Ensure the username is not already used
-                                if room.players.iter().any(|x| x.username == username) {
-                                    out.send(&Error {
-                                        code: ErrorMsg::UsedUsername,
-                                    })?;
+                                let already_used = room.with(|r| {
+                                    if r.players.iter().any(|x| x.username == username) {
+                                        Err(Error {
+                                            code: ErrorMsg::UsedUsername,
+                                        })
+                                    } else {
+                                        // Add the player to the room
+                                        r.join(Player {
+                                            username: username.clone(),
+                                            avatar,
+                                        });
 
-                                    return Ok(());
-                                }
-                                // Fetch the websocket Sender element for each player, in order to send a RoomUpdate event
-                                let ws_others = room.players.clone().into_iter().map(|x| x.ws);
-                                
-                                // Add the player to the room
-                                room.join(Player {
-                                    username,
-                                    avatar,
-                                    ws: out.clone(),
+                                        Ok(())
+                                    }
                                 });
+
+                                if let Err(err) = already_used {
+                                    cx.send(&err)?;
+                                    return Ok(None);
+                                }
+
+                                let relocation = Relocation::new(room, username.clone());
 
                                 println!("Room = {:?}", room);
 
-                                // Send an update to each other player
-                                for other in ws_others {
-                                    other.send(&RoomUpdate {
-                                        players: room.players.clone(),
-                                    })?;
-                                }
-
-                                out.send(&OnRoomJoin {
-                                    players: room.players.clone(),
-                                })?;
+                                Ok(Some(relocation))
                             }
-                            StartRound { code } => {
-                                // Get the room of given code
-
-                                let mut rooms = ROOMS.lock().unwrap();
-                                let mut room = match rooms.get_mut(&code) {
-                                    Some(room) => room,
-                                    None => return out.send(&Error {
-                                        code: ErrorMsg::RoomNotFound,
-                                    }),
-                                };
-                                room.votes.clear();
-                                if room.questions_count > 9 {
-                                    for player in &room.players {
-                                        player.ws.send(&GameOver)?;
-                                    }
-                                } else {
-                                    let question =
-                                        &QUESTIONS[room.questions[room.questions_count as usize]];
-                                    room.questions_count += 1;
-
-                                    use rand::seq::SliceRandom;
-                                    let mut rng = rand::thread_rng();
-                                    let mut players_rand = room.players.clone();
-                                    players_rand.shuffle(&mut rng);
-                                    for i in 0..room.players.len() {
-                                        room.players[i].ws.send(&NewRound {
-                                            question: question
-                                                .into_client(&players_rand[i].username),
-                                        })?;
-                                    }
-                                }
-                            }
-                            Answer { code, vote } => {
-                                let mut rooms = ROOMS.lock().unwrap();
-                                let room = match rooms.get_mut(&code) {
-                                    Some(room) => room,
-                                    None => return out.send(&Error {
-                                        code: ErrorMsg::RoomNotFound,
-                                    }),
-                                };
-
-                                room.record_vote(vote);
-                                let res = if room.votes.len() < room.players.len() {
-                                    RoundUpdate {
-                                        ready_player_count: room.votes.len() as u32,
-                                    }
-                                } else {
-                                    RoundOver {
-                                        votes: room.votes.clone(),
-                                    }
-                                };
-
-                                for player in &room.players {
-                                    player.ws.send(&res)?;
-                                }
-                            }
+                            _ => todo!(),
                         }
-
-                        Ok(())
-                    }
-                })
-                .unwrap();
+                    }),
+                );
             });
         }))
 }
