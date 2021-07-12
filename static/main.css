@@ -53,6 +53,13 @@ input {
     transition: background 0.1s ease-in;
 }
 
+.button.reconnect {
+    width: 100%;
+    font-size: 2em;
+    background-color: white;
+    box-shadow: 0 0 20px lightblue;
+}
+
 .button:hover {
     background: #8075FF88;
 }

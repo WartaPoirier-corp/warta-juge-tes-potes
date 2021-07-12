@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
-use ws_hotel::{AdHoc, Context, Message, Relocation, ResultRelocation, Room, RoomHandler};
+use ws_hotel::{AdHoc, Context, Message, Relocation, ResultRelocation, Room, RoomHandler, CloseCode};
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -216,6 +216,17 @@ impl RoomHandler for GameRoom {
                 Ok(None)
             }
         }
+    }
+
+    fn on_leave(&mut self, mut cx: Context<Self::Guest>, _code_and_reason: Option<(CloseCode, &str)>) {
+        let me = cx.identity().as_str();
+
+        self.votes.retain(|(voter, _)| voter != me);
+        self.players.retain(|p| p.username != me);
+
+        let _ignored_error = cx.broadcast(&ServerEvent::RoomUpdate {
+            players: self.players.clone(),
+        });
     }
 }
 
