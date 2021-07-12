@@ -8,8 +8,8 @@ use rocket::response::NamedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::sync::Mutex;
-use ws_hotel::{AdHoc, Context, Message, Relocation, ResultRelocation, Room, RoomHandler, CloseCode};
+use ws_hotel::{Context, Message, Relocation, ResultRelocation, Room, RoomHandler, CloseCode};
+use crate::id_gen::FunnyWords;
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -124,7 +124,6 @@ enum ClientEventGame {
 }
 
 lazy_static::lazy_static! {
-    static ref ROOMS: Mutex<HashMap<String, Room<GameRoom>>> = Mutex::new(HashMap::new());
     static ref QUESTIONS: Vec<Prompt> = {
         // TODO: c pa opti
         let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
@@ -142,6 +141,120 @@ lazy_static::lazy_static! {
 impl From<&ServerEvent<'_>> for Message {
     fn from(event: &ServerEvent<'_>) -> Self {
         Message::Text(serde_json::to_string(event).unwrap())
+    }
+}
+
+struct Lobby {
+    funny_words: FunnyWords,
+    rooms: HashMap<String, Room<GameRoom>>,
+}
+
+impl RoomHandler for Lobby {
+    type Guest = ();
+
+    fn on_message(&mut self, cx: Context<Self::Guest>, msg: Message) -> ResultRelocation {
+        use ServerEvent::*;
+
+        let msg = match msg {
+            Message::Text(s) => s,
+            _ => unreachable!(),
+        };
+
+        let evt = match serde_json::from_str(&msg) {
+            Ok(msg) => msg,
+            _ => return Ok(None),
+        };
+
+        match evt {
+            ClientEventLobby::RoomProbe { code } => {
+                let code = code.as_str();
+
+                #[cfg(debug_assertions)]
+                if code == "TEST" {
+                    cx.send(&ServerEvent::RoomProbeResult {
+                        code: Some(code),
+                    })?;
+
+                    return Ok(None)
+                }
+
+                let code = self.rooms.get_mut(code).map(|_| code);
+
+                cx.send(&ServerEvent::RoomProbeResult {
+                    code,
+                })?;
+
+                Ok(None)
+            },
+            ClientEventLobby::CreateRoom => {
+                let code = loop {
+                    let chain =
+                        id_gen::Chain::new(&self.funny_words, 0.1, rand::thread_rng());
+
+                    let code = chain.take(8).collect::<String>();
+
+                    if !self.rooms.contains_key(&code) {
+                        break code;
+                    }
+                };
+
+                let mut rng = rand::thread_rng();
+                let room = GameRoom::create(code, &QUESTIONS, &mut rng);
+
+                let code = room.code.clone();
+
+                self.rooms.insert(room.code.clone(), Room::new(room));
+
+                cx.send(&RoomCreated { code })?;
+
+                Ok(None)
+            }
+            ClientEventLobby::JoinRoom {
+                username,
+                avatar,
+                code,
+            } => {
+                // Get the room of given code
+                let room = match self.rooms.get_mut(&code) {
+                    Some(room) => room,
+                    None => {
+                        cx.send(&Error {
+                            code: ErrorMsg::RoomNotFound,
+                        })?;
+
+                        return Ok(None);
+                    }
+                };
+
+                // Ensure the username is not already used
+                let already_used = room.with(|r| {
+                    if r.players.iter().any(|x| x.username == username) {
+                        Err(Error {
+                            code: ErrorMsg::UsedUsername,
+                        })
+                    } else {
+                        // Add the player to the room
+                        r.join(Player {
+                            username: username.clone(),
+                            avatar,
+                        });
+
+                        Ok(())
+                    }
+                });
+
+                if let Err(err) = already_used {
+                    cx.send(&err)?;
+                    return Ok(None);
+                }
+
+                let relocation = Relocation::new(room, username.clone());
+
+                println!("Room = {:?}", room);
+
+                Ok(Some(relocation))
+            }
+        }
     }
 }
 
@@ -241,132 +354,24 @@ fn rocket() -> rocket::Rocket {
             rocket_contrib::serve::StaticFiles::from("static"),
         )
         .attach(rocket::fairing::AdHoc::on_launch("WebSocket", |_| {
-            let funny_words: &'static _ = {
+            let funny_words = {
                 let file = BufReader::new(
                     std::fs::File::open("funny_words.txt").expect("missing funny_words.txt"),
                 );
 
-                let funny_words: Box<id_gen::FunnyWords> = Box::new(
-                    file.lines()
+                file.lines()
                         .filter_map(|l| l.ok())
                         .filter(|line| !line.is_empty())
-                        .collect(),
-                );
-
-                Box::leak(funny_words)
+                        .collect::<FunnyWords>()
             };
 
             std::thread::spawn(move || {
                 ws_hotel::listen(
                     "0.0.0.0:8008",
-                    AdHoc::new(move |cx: Context<()>, msg: Message| {
-                        use ServerEvent::*;
-
-                        let msg = match msg {
-                            Message::Text(s) => s,
-                            _ => unreachable!(),
-                        };
-
-                        let evt = match serde_json::from_str(&msg) {
-                            Ok(msg) => msg,
-                            _ => return Ok(None),
-                        };
-
-                        match evt {
-                            ClientEventLobby::RoomProbe { code } => {
-                                let code = code.as_str();
-
-                                #[cfg(debug_assertions)]
-                                if code == "TEST" {
-                                    cx.send(&ServerEvent::RoomProbeResult {
-                                        code: Some(code),
-                                    })?;
-
-                                    return Ok(None)
-                                }
-
-                                let mut rooms = ROOMS.lock().unwrap();
-                                let code = rooms.get_mut(code).map(|_| code);
-
-                                cx.send(&ServerEvent::RoomProbeResult {
-                                    code,
-                                })?;
-
-                                Ok(None)
-                            },
-                            ClientEventLobby::CreateRoom => {
-                                let mut rooms = ROOMS.lock().unwrap();
-
-                                let code = loop {
-                                    let chain =
-                                        id_gen::Chain::new(funny_words, 0.1, rand::thread_rng());
-
-                                    let code = chain.take(8).collect::<String>();
-
-                                    if !rooms.contains_key(&code) {
-                                        break code;
-                                    }
-                                };
-
-                                let mut rng = rand::thread_rng();
-                                let room = GameRoom::create(code, &QUESTIONS, &mut rng);
-
-                                let code = room.code.clone();
-
-                                rooms.insert(room.code.clone(), Room::new(room));
-
-                                cx.send(&RoomCreated { code })?;
-
-                                Ok(None)
-                            }
-                            ClientEventLobby::JoinRoom {
-                                username,
-                                avatar,
-                                code,
-                            } => {
-                                // Get the room of given code
-                                let mut rooms = ROOMS.lock().unwrap();
-                                let room = match rooms.get_mut(&code) {
-                                    Some(room) => room,
-                                    None => {
-                                        cx.send(&Error {
-                                            code: ErrorMsg::RoomNotFound,
-                                        })?;
-
-                                        return Ok(None);
-                                    }
-                                };
-
-                                // Ensure the username is not already used
-                                let already_used = room.with(|r| {
-                                    if r.players.iter().any(|x| x.username == username) {
-                                        Err(Error {
-                                            code: ErrorMsg::UsedUsername,
-                                        })
-                                    } else {
-                                        // Add the player to the room
-                                        r.join(Player {
-                                            username: username.clone(),
-                                            avatar,
-                                        });
-
-                                        Ok(())
-                                    }
-                                });
-
-                                if let Err(err) = already_used {
-                                    cx.send(&err)?;
-                                    return Ok(None);
-                                }
-
-                                let relocation = Relocation::new(room, username.clone());
-
-                                println!("Room = {:?}", room);
-
-                                Ok(Some(relocation))
-                            }
-                        }
-                    }),
+                    Lobby {
+                        funny_words,
+                        rooms: HashMap::new(),
+                    },
                 );
             });
         }))
