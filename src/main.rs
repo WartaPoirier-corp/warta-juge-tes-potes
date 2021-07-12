@@ -53,6 +53,15 @@ struct GameRoom {
 #[derive(Serialize)]
 #[serde(tag = "tag")]
 enum ServerEvent<'a> {
+    /// Reply to a [ClientEventLobby::RoomProbe]
+    ///
+    /// If [`code`][ServerEvent::RoomProbeResult::code]...
+    ///   * ... is [None], the room doesn't exist
+    ///   * ... is [Some], the room exists, and its code is given back
+    RoomProbeResult {
+        code: Option<&'a str>,
+    },
+
     /// When Server created a room and tells Client that the room is ready
     RoomCreated {
         code: String,
@@ -87,7 +96,13 @@ enum ServerEvent<'a> {
 #[derive(Deserialize)]
 #[serde(tag = "tag")]
 enum ClientEventLobby {
-    /***** Client *****/
+    /// Asks the server if a room exists
+    ///
+    /// The server must always reply with a [ServerEvent::RoomProbeResult]
+    RoomProbe {
+        code: String,
+    },
+
     /// Client ask Server to create a room
     CreateRoom, //TODO règles
     /// When Client joins a room
@@ -245,6 +260,27 @@ fn rocket() -> rocket::Rocket {
                         };
 
                         match evt {
+                            ClientEventLobby::RoomProbe { code } => {
+                                let code = code.as_str();
+
+                                #[cfg(debug_assertions)]
+                                if code == "TEST" {
+                                    cx.send(&ServerEvent::RoomProbeResult {
+                                        code: Some(code),
+                                    })?;
+
+                                    return Ok(None)
+                                }
+
+                                let mut rooms = ROOMS.lock().unwrap();
+                                let code = rooms.get_mut(code).map(|_| code);
+
+                                cx.send(&ServerEvent::RoomProbeResult {
+                                    code,
+                                })?;
+
+                                Ok(None)
+                            },
                             ClientEventLobby::CreateRoom => {
                                 let mut rooms = ROOMS.lock().unwrap();
 
