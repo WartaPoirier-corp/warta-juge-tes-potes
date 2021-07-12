@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use ws_hotel::{Context, Message, Relocation, ResultRelocation, Room, RoomHandler, CloseCode};
 use crate::id_gen::FunnyWords;
+use std::sync::{Arc, Weak};
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -17,7 +18,7 @@ struct Player {
     avatar: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 enum Prompt {
     Question(String),
     Tag(String, Vec<(String, String, String)>),
@@ -43,6 +44,8 @@ type Username = String;
 
 #[derive(Debug)]
 struct GameRoom {
+    all_questions: Weak<[Prompt]>,
+
     code: String,
     players: Vec<Player>,
     votes: Vec<Vote>,
@@ -123,21 +126,6 @@ enum ClientEventGame {
     Answer { vote: Vote },
 }
 
-lazy_static::lazy_static! {
-    static ref QUESTIONS: Vec<Prompt> = {
-        // TODO: c pa opti
-        let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
-        let questions: Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
-
-        println!("Read {} questions ({} tags)", questions.len(), questions.iter().filter(|x| match x {
-            Prompt::Tag(_, _) => true,
-            _ => false,
-        }).count());
-
-        questions
-    };
-}
-
 impl From<&ServerEvent<'_>> for Message {
     fn from(event: &ServerEvent<'_>) -> Self {
         Message::Text(serde_json::to_string(event).unwrap())
@@ -146,6 +134,7 @@ impl From<&ServerEvent<'_>> for Message {
 
 struct Lobby {
     funny_words: FunnyWords,
+    questions: Arc<[Prompt]>,
     rooms: HashMap<String, Room<GameRoom>>,
 }
 
@@ -199,7 +188,7 @@ impl RoomHandler for Lobby {
                 };
 
                 let mut rng = rand::thread_rng();
-                let room = GameRoom::create(code, &QUESTIONS, &mut rng);
+                let room = GameRoom::create(Arc::downgrade(&self.questions), code, &self.questions, &mut rng);
 
                 let code = room.code.clone();
 
@@ -296,7 +285,7 @@ impl RoomHandler for GameRoom {
 
                     Ok(None)
                 } else {
-                    let question = &QUESTIONS[self.questions[self.questions_count as usize]];
+                    let question = &self.all_questions.upgrade().unwrap()[self.questions[self.questions_count as usize]];
                     self.questions_count += 1;
 
                     use rand::seq::SliceRandom;
@@ -365,11 +354,25 @@ fn rocket() -> rocket::Rocket {
                         .collect::<FunnyWords>()
             };
 
+            let questions = {
+                // TODO: c pa opti
+                let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
+                let questions: Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
+
+                println!("Read {} questions ({} tags)", questions.len(), questions.iter().filter(|x| match x {
+                    Prompt::Tag(_, _) => true,
+                    _ => false,
+                }).count());
+
+                questions.into_boxed_slice().into()
+            };
+
             std::thread::spawn(move || {
                 ws_hotel::listen(
                     "0.0.0.0:8008",
                     Lobby {
                         funny_words,
+                        questions,
                         rooms: HashMap::new(),
                     },
                 );
@@ -383,10 +386,11 @@ async fn index() -> Option<NamedFile> {
 }
 
 impl GameRoom {
-    fn create<R: rand::Rng + ?Sized>(code: String, questions: &[Prompt], rng: &mut R) -> Self {
+    fn create<R: rand::Rng + ?Sized>(all_questions: Weak<[Prompt]>, code: String, questions: &[Prompt], rng: &mut R) -> Self {
         // Randomly choose 10 index for questions
         let v = (0..questions.len()).choose_multiple(rng, 10);
         Self {
+            all_questions,
             code,
             players: vec![],
             votes: vec![],
