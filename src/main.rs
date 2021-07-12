@@ -69,6 +69,7 @@ enum ServerEvent<'a> {
     /// When Server sends all the infos about the room to a Client that has just joined
     OnRoomJoin {
         players: Vec<Player>,
+        question_counter: u32,
         // TODO règles
     },
     /// When Server tells Clients that something has changed in the room (e.g. new player)
@@ -155,6 +156,7 @@ impl RoomHandler for GameRoom {
 
         cx.send(&ServerEvent::OnRoomJoin {
             players: self.players.clone(),
+            question_counter: self.questions_count,
         })?;
 
         Ok(None)
