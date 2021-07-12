@@ -169,7 +169,7 @@ const registerSocketMessages = (socket) => socket.addEventListener('message', ev
             break
         case 'OnRoomJoin':
             players = data.players
-            questionCounter = 0
+            questionCounter = data.question_counter
             m.route.set('/lobby')
             break
         case 'RoomUpdate':
