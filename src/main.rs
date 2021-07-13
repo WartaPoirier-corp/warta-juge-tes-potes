@@ -158,15 +158,6 @@ impl RoomHandler for Lobby {
             ClientEventLobby::RoomProbe { code } => {
                 let code = code.as_str();
 
-                #[cfg(debug_assertions)]
-                if code == "TEST" {
-                    cx.send(&ServerEvent::RoomProbeResult {
-                        code: Some(code),
-                    })?;
-
-                    return Ok(None)
-                }
-
                 let code = self.rooms.get_mut(code).map(|_| code);
 
                 cx.send(&ServerEvent::RoomProbeResult {
