@@ -126,6 +126,10 @@ enum ClientEventGame {
     StartRound,
     /// When Client answers to a question
     Answer { vote: Vote },
+
+    /// Sent by a client who wants to leave its current game room. May be sent at any point in time,
+    /// but, as of today, a normal client should only display a "leave" button at the end of a game.
+    LeaveRoom,
 }
 
 impl From<&ServerEvent<'_>> for Message {
@@ -318,6 +322,9 @@ impl RoomHandler for GameRoom {
                 cx.broadcast(&res)?;
 
                 Ok(None)
+            }
+            ClientEventGame::LeaveRoom => {
+                Ok(Some(Relocation::new(&self.lobby, ())))
             }
         }
     }
