@@ -432,6 +432,7 @@ const End = {
         showConnectionState(),
         m('h2', {}, 'C\'est la fin'),
         m('a', { className: 'button', href: '#', onclick: () => {
+            send({ tag: 'LeaveRoom' })
             m.route.set('/home')
         } }, 'Retourner à l\'accueil'),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
