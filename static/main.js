@@ -160,7 +160,7 @@ const registerSocketMessages = (socket) => socket.addEventListener('message', ev
             localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_USERNAME, name)
             localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_AVATAR, avatar)
             players = data.players
-            questionCounter = data.question_counter
+            questionCounter = data.step
             m.route.set('/lobby')
             break
         case 'RoomUpdate':
@@ -436,10 +436,7 @@ const End = {
             m.route.set('/home')
         } }, 'Retourner à l\'accueil'),
         name == players[0].username ? m('a', { className: 'button', href: '#', onclick: () => {
-            send({
-                tag: 'StartGame',
-                code: game
-            })
+            send({ tag: 'StartRound' })
         } }, 'Refaire une partie avec les mêmes personnes') : null
     ])
 }

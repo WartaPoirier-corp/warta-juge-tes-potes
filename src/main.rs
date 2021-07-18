@@ -45,6 +45,41 @@ enum ErrorMsg {
 type Vote = (Username, Username);
 type Username = String;
 
+/// Game progress
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Step {
+    Lobby,
+    Question(u8),
+    Finished,
+}
+
+impl Step {
+    pub fn advance(&mut self) -> Self {
+        let next = match *self {
+            Self::Lobby => Self::Question(0),
+            Self::Question(9) => Self::Finished, // TODO replace the magic number
+            Self::Question(idx) => Self::Question(idx + 1),
+            Self::Finished => Self::Lobby,
+        };
+
+        *self = next;
+
+        next
+    }
+}
+
+impl Serialize for Step {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+        let n = match *self {
+            Self::Lobby => 0,
+            Self::Question(q) => q as i16,
+            Self::Finished => 9, // TODO replace the magic number
+        };
+
+        serializer.serialize_i16(n)
+    }
+}
+
 #[derive(Debug)]
 struct GameRoom {
     lobby: RoomRef<Lobby>,
@@ -53,7 +88,7 @@ struct GameRoom {
     code: String,
     players: Vec<Player>,
     votes: Vec<Vote>,
-    questions_count: u32,
+    step: Step,
     questions: Vec<usize>,
 }
 
@@ -73,7 +108,7 @@ enum ServerEvent<'a> {
     OnRoomJoin {
         code: &'a str,
         players: Vec<Player>,
-        question_counter: u32,
+        step: Step,
         // TODO règles
     },
 
@@ -262,7 +297,7 @@ impl RoomHandler for GameRoom {
         cx.send(&ServerEvent::OnRoomJoin {
             code: &self.code,
             players: self.players.clone(),
-            question_counter: self.questions_count,
+            step: self.step,
         })?;
 
         Ok(None)
@@ -284,27 +319,40 @@ impl RoomHandler for GameRoom {
         match evt {
             ClientEventGame::StartRound => {
                 self.votes.clear();
-                if self.questions_count > 9 {
-                    cx.broadcast(&GameOver)?;
+                match self.step.advance() {
+                    Step::Question(idx) => {
+                        let question = &self
+                            .all_questions
+                            .upgrade()
+                            .unwrap()[self.questions[idx as usize]];
 
-                    Ok(None)
-                } else {
-                    let question = &self.all_questions.upgrade().unwrap()[self.questions[self.questions_count as usize]];
-                    self.questions_count += 1;
+                        use rand::seq::SliceRandom;
+                        let mut rng = rand::thread_rng();
+                        let mut players_rand = self.players.clone();
+                        players_rand.shuffle(&mut rng);
+                        let mut players_rand = players_rand.into_iter();
 
-                    use rand::seq::SliceRandom;
-                    let mut rng = rand::thread_rng();
-                    let mut players_rand = self.players.clone();
-                    players_rand.shuffle(&mut rng);
-                    let mut players_rand = players_rand.into_iter();
+                        cx.broadcast_with(|_| {
+                            Message::from(&NewRound {
+                                question: question.into_client(&players_rand.next().unwrap().username),
+                            })
+                        })?;
 
-                    cx.broadcast_with(|_| {
-                        Message::from(&NewRound {
-                            question: question.into_client(&players_rand.next().unwrap().username),
-                        })
-                    })?;
+                        Ok(None)
+                    }
+                    Step::Finished => {
+                        cx.broadcast(&GameOver)?;
+                        Ok(None)
+                    }
+                    Step::Lobby => {
+                        cx.broadcast(&ServerEvent::OnRoomJoin {
+                            code: &self.code,
+                            players: self.players.clone(),
+                            step: self.step,
+                        })?;
 
-                    Ok(None)
+                        Ok(None)
+                    }
                 }
             }
             ClientEventGame::Answer { vote } => {
@@ -408,7 +456,7 @@ impl GameRoom {
             code,
             players: vec![],
             votes: vec![],
-            questions_count: 0,
+            step: Step::Lobby,
             questions: v,
         }
     }
