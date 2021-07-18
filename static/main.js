@@ -154,20 +154,11 @@ const registerSocketMessages = (socket) => socket.addEventListener('message', ev
                 localStorage.removeItem(LOCALSTORAGE_CURRENT_GAME_CODE)
             }
             break
-        case 'RoomCreated':
+        case 'OnRoomJoin':
             game = data.code
-            name = document.getElementById('username').value
             localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_CODE, game)
             localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_USERNAME, name)
             localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_AVATAR, avatar)
-            send({
-                tag: 'JoinRoom',
-                username: name,
-                avatar: avatar,
-                code: game
-            })
-            break
-        case 'OnRoomJoin':
             players = data.players
             questionCounter = data.question_counter
             m.route.set('/lobby')
@@ -306,7 +297,10 @@ const Home = {
                 m('a', { className: 'button', onclick: () => {
                     name = document.getElementById('username').value
                     send({
-                        tag: 'CreateRoom'
+                        tag: 'JoinRoom',
+                        avatar: avatar,
+                        username: name,
+                        code: null
                     })
                 } }, 'Créer une partie')
             ]),
@@ -317,9 +311,6 @@ const Home = {
                 m('a', { className: 'button', href: '#', onclick: () => {
                     game = document.getElementById('code').value
                     name = document.getElementById('username').value
-                    localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_CODE, game)
-                    localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_USERNAME, name)
-                    localStorage.setItem(LOCALSTORAGE_CURRENT_GAME_AVATAR, avatar)
                     send({
                         tag: 'JoinRoom',
                         avatar: avatar,
