@@ -37,6 +37,7 @@ enum ClientPrompt<'a> {
 #[derive(Serialize)]
 enum ErrorMsg {
     UsedUsername,
+    EmptyUsername,
     RoomNotFound,
 }
 
@@ -213,7 +214,24 @@ impl RoomHandler for Lobby {
                 avatar,
                 code,
             } => {
+                if username.is_empty() {
+                    cx.send(&Error {
+                        code: ErrorMsg::EmptyUsername,
+                    })?;
+
+                    return Ok(None)
+                }
+
                 let room = if let Some(code) = code {
+                    // Short circuit for performance
+                    if code.len() != 8 {
+                        cx.send(&Error {
+                            code: ErrorMsg::RoomNotFound,
+                        })?;
+
+                        return Ok(None);
+                    }
+
                     // Get the room of given code
                     match self.rooms.get_mut(&code).and_then(|r| r.upgrade()) {
                         Some(room) => room,
