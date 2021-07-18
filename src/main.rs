@@ -115,6 +115,7 @@ enum ClientEventLobby {
         username: Username,
         avatar: String,
         code: Option<String>,
+        // TODO règles (replace this enum field with another enum)
     },
 }
 
