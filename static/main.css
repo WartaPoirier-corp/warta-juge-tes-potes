@@ -26,9 +26,14 @@ header a, header a:visited {
     text-decoration: none;
 }
 
-main {
+main, [role=main] {
     margin: 1em auto;
     width: clamp(100px, 70ch, 95vw);
+}
+
+[role=main] > section > input {
+    width: 100%;
+    box-sizing: border-box;
 }
 
 input {
@@ -47,6 +52,8 @@ input {
     border-radius: 4px;
     padding: 1em;
     display: block;
+    font-size: inherit;
+    font-family: inherit;
     text-align: center;
     text-decoration: none;
     cursor: pointer;

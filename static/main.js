@@ -260,7 +260,17 @@ const showSkipButton = () => {
 
 const Home = {
     view: () => {
-        return m('main', {}, [
+        return m('form', { role: 'main', action: `javascript:undefined`, onsubmit: () => {
+                document.querySelector('#code').required = true
+                name = document.getElementById('username').value
+
+                send({
+                    tag: 'JoinRoom',
+                    avatar: avatar,
+                    username: name,
+                    code: game
+                })
+            } }, [
             showConnectionState(),
             lastGame.live && m('a', { className: 'button reconnect', onclick: () => {
                 game = lastGame.code
@@ -277,7 +287,7 @@ const Home = {
             m('section', {}, [
                 m('h2', {}, 'T ki'),
                 m('p', {}, 'Entre ton nom et choisis ton avatar.'),
-                m('input', { id: 'username' }),
+                m('input', { id: 'username', required: true, minLength: 1 }),
                 m('div', { id: 'avatar-selector' }, avatars.map(a =>
                     m('img', {
                         id: a,
@@ -294,30 +304,20 @@ const Home = {
             m('section', {}, [
                 m('h2', {}, 'Créer une partie'),
                 m('p', {}, 'Crée une partie et envoie le code à tes amis'),
-                m('a', { className: 'button', onclick: () => {
-                    name = document.getElementById('username').value
-                    send({
-                        tag: 'JoinRoom',
-                        avatar: avatar,
-                        username: name,
-                        code: null
-                    })
-                } }, 'Créer une partie')
+                m('input', { type: 'submit', className: 'button', value: 'Créer une partie', onclick: () => {
+                    game = null
+                    document.querySelector('#code').required = false
+                } })
             ]),
             m('section', {}, [
                 m('h2', {}, 'Rejoindre une partie'),
                 m('p', {}, 'Rentre le code d\'une partie déjà créé pour la rejoindre'),
-                m('input', { id: 'code' }),
-                m('a', { className: 'button', href: '#', onclick: () => {
+                m('input', {
+                    id: 'code', required: true, minLength: 8, maxLength: 8, pattern: '[0-9A-Z]{8}', autocomplete: false
+                }),
+                m('input', { type: 'submit', className: 'button', value: 'Rejoindre', onclick: () => {
                     game = document.getElementById('code').value
-                    name = document.getElementById('username').value
-                    send({
-                        tag: 'JoinRoom',
-                        avatar: avatar,
-                        username: name,
-                        code: game
-                    })
-                } }, 'Rejoindre')
+                } })
             ])
         ])
     }
