@@ -1727,7 +1727,7 @@ dependencies = [
 [[package]]
 name = "ws-hotel"
 version = "0.1.0"
-source = "git+https://github.com/edgarogh/ws-hotel?branch=early-dev#ea6bb8a9f29af5245c24da4772c1b38fd69aefcf"
+source = "git+https://github.com/edgarogh/ws-hotel?branch=early-dev#eef76ec951115b35544c66b54556188ff1049382"
 dependencies = [
  "ws",
 ]

@@ -8,7 +8,10 @@ use rocket::response::NamedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use ws_hotel::{Context, Message, Relocation, ResultRelocation, Room, RoomHandler, CloseCode};
+use ws_hotel::{
+    Context, Message, Relocation, ResultRelocation, Room, RoomRef, RoomHandler, CloseCode,
+    RoomRefWeak,
+};
 use crate::id_gen::FunnyWords;
 use std::sync::{Arc, Weak};
 
@@ -44,6 +47,7 @@ type Username = String;
 
 #[derive(Debug)]
 struct GameRoom {
+    lobby: RoomRef<Lobby>,
     all_questions: Weak<[Prompt]>,
 
     code: String,
@@ -65,16 +69,14 @@ enum ServerEvent<'a> {
         code: Option<&'a str>,
     },
 
-    /// When Server created a room and tells Client that the room is ready
-    RoomCreated {
-        code: String,
-    },
     /// When Server sends all the infos about the room to a Client that has just joined
     OnRoomJoin {
+        code: &'a str,
         players: Vec<Player>,
         question_counter: u32,
         // TODO règles
     },
+
     /// When Server tells Clients that something has changed in the room (e.g. new player)
     RoomUpdate {
         players: Vec<Player>,
@@ -107,13 +109,12 @@ enum ClientEventLobby {
         code: String,
     },
 
-    /// Client ask Server to create a room
-    CreateRoom, //TODO règles
-    /// When Client joins a room
+    /// Asks the server to join a room if a code is given, or to create one and join it immediately
+    /// else.
     JoinRoom {
         username: Username,
         avatar: String,
-        code: String,
+        code: Option<String>,
     },
 }
 
@@ -132,16 +133,17 @@ impl From<&ServerEvent<'_>> for Message {
     }
 }
 
+#[derive(Debug)]
 struct Lobby {
     funny_words: FunnyWords,
     questions: Arc<[Prompt]>,
-    rooms: HashMap<String, Room<GameRoom>>,
+    rooms: HashMap<String, RoomRefWeak<GameRoom>>,
 }
 
 impl RoomHandler for Lobby {
     type Guest = ();
 
-    fn on_message(&mut self, cx: Context<Self::Guest>, msg: Message) -> ResultRelocation {
+    fn on_message(&mut self, cx: Context<Self>, msg: Message) -> ResultRelocation {
         use ServerEvent::*;
 
         let msg = match msg {
@@ -158,7 +160,7 @@ impl RoomHandler for Lobby {
             ClientEventLobby::RoomProbe { code } => {
                 let code = code.as_str();
 
-                let code = self.rooms.get_mut(code).map(|_| code);
+                let code = self.rooms.get_mut(code).and_then(|weak| weak.upgrade()).map(|_| code);
 
                 cx.send(&ServerEvent::RoomProbeResult {
                     code,
@@ -166,44 +168,49 @@ impl RoomHandler for Lobby {
 
                 Ok(None)
             },
-            ClientEventLobby::CreateRoom => {
-                let code = loop {
-                    let chain =
-                        id_gen::Chain::new(&self.funny_words, 0.1, rand::thread_rng());
-
-                    let code = chain.take(8).collect::<String>();
-
-                    if !self.rooms.contains_key(&code) {
-                        break code;
-                    }
-                };
-
-                let mut rng = rand::thread_rng();
-                let room = GameRoom::create(Arc::downgrade(&self.questions), code, &self.questions, &mut rng);
-
-                let code = room.code.clone();
-
-                self.rooms.insert(room.code.clone(), Room::new(room));
-
-                cx.send(&RoomCreated { code })?;
-
-                Ok(None)
-            }
             ClientEventLobby::JoinRoom {
                 username,
                 avatar,
                 code,
             } => {
-                // Get the room of given code
-                let room = match self.rooms.get_mut(&code) {
-                    Some(room) => room,
-                    None => {
-                        cx.send(&Error {
-                            code: ErrorMsg::RoomNotFound,
-                        })?;
+                let room = if let Some(code) = code {
+                    // Get the room of given code
+                    match self.rooms.get_mut(&code).and_then(|r| r.upgrade()) {
+                        Some(room) => room,
+                        None => {
+                            cx.send(&Error {
+                                code: ErrorMsg::RoomNotFound,
+                            })?;
 
-                        return Ok(None);
+                            return Ok(None);
+                        }
                     }
+                } else {
+                    let code = loop {
+                        let chain =
+                            id_gen::Chain::new(&self.funny_words, 0.1, rand::thread_rng());
+
+                        let code = chain.take(8).collect::<String>();
+
+                        if !self.rooms.contains_key(&code) {
+                            break code;
+                        }
+                    };
+
+                    let mut rng = rand::thread_rng();
+                    let room = GameRoom::create(
+                        cx.room().upgrade().unwrap(),
+                        Arc::downgrade(&self.questions),
+                        code, &self.questions,
+                        &mut rng
+                    );
+
+                    let code = room.code.clone();
+
+                    let room_ref = Room::new(room);
+                    self.rooms.insert(code, room_ref.downgrade());
+
+                    room_ref
                 };
 
                 // Ensure the username is not already used
@@ -228,7 +235,7 @@ impl RoomHandler for Lobby {
                     return Ok(None);
                 }
 
-                let relocation = Relocation::new(room, username.clone());
+                let relocation = Relocation::new(&room, username.clone());
 
                 println!("Room = {:?}", room);
 
@@ -241,13 +248,14 @@ impl RoomHandler for Lobby {
 impl RoomHandler for GameRoom {
     type Guest = String;
 
-    fn on_join(&mut self, cx: Context<Self::Guest>) -> ResultRelocation {
+    fn on_join(&mut self, cx: Context<Self>) -> ResultRelocation {
         // Send an update to each other player
         cx.broadcast(&ServerEvent::RoomUpdate {
             players: self.players.clone(),
         })?;
 
         cx.send(&ServerEvent::OnRoomJoin {
+            code: &self.code,
             players: self.players.clone(),
             question_counter: self.questions_count,
         })?;
@@ -255,7 +263,7 @@ impl RoomHandler for GameRoom {
         Ok(None)
     }
 
-    fn on_message(&mut self, cx: Context<Self::Guest>, msg: Message) -> ResultRelocation {
+    fn on_message(&mut self, cx: Context<Self>, msg: Message) -> ResultRelocation {
         use ServerEvent::*;
 
         let msg = match msg {
@@ -313,7 +321,7 @@ impl RoomHandler for GameRoom {
         }
     }
 
-    fn on_leave(&mut self, mut cx: Context<Self::Guest>, _code_and_reason: Option<(CloseCode, &str)>) {
+    fn on_leave(&mut self, mut cx: Context<Self>, _code_and_reason: Option<(CloseCode, &str)>) {
         let me = cx.identity().as_str();
 
         self.votes.retain(|(voter, _)| voter != me);
@@ -377,10 +385,17 @@ async fn index() -> Option<NamedFile> {
 }
 
 impl GameRoom {
-    fn create<R: rand::Rng + ?Sized>(all_questions: Weak<[Prompt]>, code: String, questions: &[Prompt], rng: &mut R) -> Self {
+    fn create<R: rand::Rng + ?Sized>(
+        lobby: RoomRef<Lobby>,
+        all_questions: Weak<[Prompt]>,
+        code: String,
+        questions: &[Prompt],
+        rng: &mut R
+    ) -> Self {
         // Randomly choose 10 index for questions
         let v = (0..questions.len()).choose_multiple(rng, 10);
         Self {
+            lobby,
             all_questions,
             code,
             players: vec![],
