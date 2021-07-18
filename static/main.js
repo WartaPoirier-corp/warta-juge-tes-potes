@@ -105,7 +105,8 @@ let lastGame = {
 
 const errors = {
     'UsedUsername': 'Ce pseudo est déjà pris',
-    'RoomNotFound': 'Cette partie n\'existe pas',
+    'EmptyUsername': 'Ce pseudo est vide',
+    'RoomNotFound': 'Cette partie n\'existe pas'
 }
 
 /** @type {WebSocket} */
