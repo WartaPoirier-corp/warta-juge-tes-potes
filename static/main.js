@@ -86,7 +86,7 @@ let avatar = avatars[0]
 let readyCounter = 0
 let answers = []
 let answered = false
-let errorMessage = ''
+let error = undefined
 let questionCounter = 0
 
 /**
@@ -103,7 +103,7 @@ let lastGame = {
     live: undefined // is the game currently running: undefined or true
 }
 
-const errors = {
+const ERRORS = {
     'UsedUsername': 'Ce pseudo est déjà pris',
     'EmptyUsername': 'Ce pseudo est vide',
     'RoomNotFound': 'Cette partie n\'existe pas'
@@ -219,10 +219,8 @@ const registerSocketMessages = (socket) => socket.addEventListener('message', ev
             m.route.set('/end')
             break
         case 'Error':
-            errorMessage = errors[data.code]
-            window.setTimeout(() => {
-                errorMessage = null
-            }, 5000)
+            error = data.code
+            m.redraw()
             break
         default:
             console.log('Unknown message', data)
@@ -259,6 +257,43 @@ const showSkipButton = () => {
     }, '🔓 Passer la question')
 }
 
+const ErrorTooltip = {
+    onupdate: ({ state, dom }) => {
+        ErrorTooltip.onbeforeremove({ state })
+
+        function onBlur() {
+            error = undefined
+            m.redraw()
+            document.body.removeEventListener('click', state.onBlur)
+        }
+
+        state.onBlur = onBlur
+        document.body.addEventListener('click', onBlur)
+
+        if (dom) {
+            dom.scrollIntoView()
+        }
+    },
+    view: ({ attrs }) => {
+        const { handledErrors } = attrs
+
+        if (handledErrors.includes(error)) {
+            const errorMessage = ERRORS[error]
+            return m('.tooltip', {
+                onblur: () => {
+                    error = undefined
+                    m.render()
+                },
+            }, errorMessage)
+        } else {
+            return undefined
+        }
+    },
+    onbeforeremove: ({ state }) => {
+        if (state.onBlur) document.body.removeEventListener('click', state.onBlur)
+    }
+}
+
 const Home = {
     view: () => {
         return m('form', { role: 'main', action: `javascript:undefined`, onsubmit: () => {
@@ -288,7 +323,10 @@ const Home = {
             m('section', {}, [
                 m('h2', {}, 'T ki'),
                 m('p', {}, 'Entre ton nom et choisis ton avatar.'),
-                m('input', { id: 'username', required: true, minLength: 1 }),
+                m('.tooltip-container', {}, [
+                    m(ErrorTooltip, { handledErrors: ['UsedUsername', 'EmptyUsername'] }),
+                    m('input', { id: 'username', required: true, minLength: 1 }),
+                ]),
                 m('div', { id: 'avatar-selector' }, avatars.map(a =>
                     m('img', {
                         id: a,
@@ -313,9 +351,12 @@ const Home = {
             m('section', {}, [
                 m('h2', {}, 'Rejoindre une partie'),
                 m('p', {}, 'Rentre le code d\'une partie déjà créé pour la rejoindre'),
-                m('input', {
-                    id: 'code', required: true, minLength: 8, maxLength: 8, pattern: '[0-9A-Z]{8}', autocomplete: false
-                }),
+                m('.tooltip-container', {}, [
+                    m(ErrorTooltip, { handledErrors: ['RoomNotFound'] }),
+                    m('input', {
+                        id: 'code', required: true, minLength: 8, maxLength: 8, pattern: '[0-9A-Z]{8}', autocomplete: false
+                    })
+                ]),
                 m('input', { type: 'submit', className: 'button', value: 'Rejoindre', onclick: () => {
                     game = document.getElementById('code').value
                 } })

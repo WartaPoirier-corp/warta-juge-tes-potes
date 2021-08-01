@@ -31,6 +31,37 @@ main, [role=main] {
     width: clamp(100px, 70ch, 95vw);
 }
 
+.tooltip-container {
+    position: relative;
+}
+
+.tooltip {
+    position: absolute;
+    bottom: 120%;
+    left: 50%;
+    border-radius: 8px;
+    padding: 0.5em 1em;
+    margin-left: -25%;
+    width: 50%;
+
+    background: black;
+    text-align: center;
+    z-index: 1;
+
+    box-shadow: 0 0 30px #ff8080;
+}
+
+.tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+
+    border: 5px solid;
+    border-color: black transparent transparent transparent;
+}
+
 [role=main] > section > input {
     width: 100%;
     box-sizing: border-box;
