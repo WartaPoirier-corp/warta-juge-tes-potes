@@ -76,11 +76,11 @@ impl Serialize for Step {
     {
         let n = match *self {
             Self::Lobby => 0,
-            Self::Question(q) => q as i16,
+            Self::Question(q) => q,
             Self::Finished => 9, // TODO replace the magic number
         };
 
-        serializer.serialize_i16(n)
+        serializer.serialize_u8(n)
     }
 }
 
@@ -188,15 +188,8 @@ impl RoomHandler for Lobby {
     fn on_message(&mut self, cx: Context<Self>, msg: Message) -> ResultRelocation {
         use ServerEvent::*;
 
-        let msg = match msg {
-            Message::Text(s) => s,
-            _ => unreachable!(),
-        };
-
-        let evt = match serde_json::from_str(&msg) {
-            Ok(msg) => msg,
-            _ => return Ok(None),
-        };
+        let Message::Text(msg) = msg else { unreachable!() };
+        let Ok(evt) = serde_json::from_str(&msg) else { return Ok(None) };
 
         match evt {
             ClientEventLobby::RoomProbe { code } => {
@@ -236,15 +229,14 @@ impl RoomHandler for Lobby {
                     }
 
                     // Get the room of given code
-                    match self.rooms.get_mut(&code).and_then(|r| r.upgrade()) {
-                        Some(room) => room,
-                        None => {
-                            cx.send(&Error {
-                                code: ErrorMsg::RoomNotFound,
-                            })?;
+                    if let Some(room) = self.rooms.get_mut(&code).and_then(|r| r.upgrade()) {
+                        room
+                    } else {
+                        cx.send(&Error {
+                            code: ErrorMsg::RoomNotFound,
+                        })?;
 
-                            return Ok(None);
-                        }
+                        return Ok(None);
                     }
                 } else {
                     let code = loop {
@@ -298,7 +290,7 @@ impl RoomHandler for Lobby {
 
                 let relocation = Relocation::new(&room, username.clone());
 
-                println!("Room = {:?}", room);
+                println!("Room = {room:?}");
 
                 Ok(Some(relocation))
             }
@@ -327,25 +319,19 @@ impl RoomHandler for GameRoom {
     fn on_message(&mut self, cx: Context<Self>, msg: Message) -> ResultRelocation {
         use ServerEvent::*;
 
-        let msg = match msg {
-            Message::Text(s) => s,
-            _ => unreachable!(),
-        };
-
-        let evt = match serde_json::from_str(&msg) {
-            Ok(msg) => msg,
-            _ => return Ok(None),
-        };
+        let Message::Text(msg) = msg else { unreachable!() };
+        let Ok(evt) = serde_json::from_str(&msg) else { return Ok(None) };
 
         match evt {
             ClientEventGame::StartRound => {
                 self.votes.clear();
                 match self.step.advance() {
                     Step::Question(idx) => {
+                        use rand::seq::SliceRandom;
+
                         let question =
                             &self.all_questions.upgrade().unwrap()[self.questions[idx as usize]];
 
-                        use rand::seq::SliceRandom;
                         let mut rng = rand::thread_rng();
                         let mut players_rand = self.players.clone();
                         players_rand.shuffle(&mut rng);
@@ -354,7 +340,7 @@ impl RoomHandler for GameRoom {
                         cx.broadcast_with(|_| {
                             Message::from(&NewRound {
                                 question: question
-                                    .into_client(&players_rand.next().unwrap().username),
+                                    .to_client(&players_rand.next().unwrap().username),
                             })
                         })?;
 
@@ -379,7 +365,7 @@ impl RoomHandler for GameRoom {
                 self.record_vote(vote);
                 let res = if self.votes.len() < self.players.len() {
                     RoundUpdate {
-                        ready_player_count: self.votes.len() as u32,
+                        ready_player_count: u32::try_from(self.votes.len()).unwrap(),
                     }
                 } else {
                     RoundOver {
@@ -410,7 +396,7 @@ impl RoomHandler for GameRoom {
 #[rocket::launch]
 fn launch() -> _ {
     rocket::build()
-        .mount("/", routes![index,])
+        .mount("/", routes![index])
         .mount("/static", FileServer::from("static"))
         .attach(rocket::fairing::AdHoc::on_liftoff("WebSocket", |_| {
             Box::pin(async {
@@ -420,7 +406,7 @@ fn launch() -> _ {
                     );
 
                     file.lines()
-                        .filter_map(|l| l.ok())
+                        .filter_map(Result::ok)
                         .filter(|line| !line.is_empty())
                         .collect::<FunnyWords>()
                 };
@@ -496,11 +482,11 @@ impl GameRoom {
 }
 
 impl Prompt {
-    fn into_client<'a>(&'a self, username: &'a str) -> ClientPrompt<'a> {
+    fn to_client<'a>(&'a self, username: &'a str) -> ClientPrompt<'a> {
         match self {
-            Prompt::Question(s) => ClientPrompt::Question(&s),
+            Prompt::Question(s) => ClientPrompt::Question(s),
             Prompt::Tag(s, v) => ClientPrompt::Tag(
-                &s,
+                s,
                 username,
                 v.iter()
                     .map(|x| (x.0.as_str(), x.1.as_str(), x.2.as_str()))

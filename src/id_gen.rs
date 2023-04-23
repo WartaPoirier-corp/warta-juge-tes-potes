@@ -35,7 +35,7 @@ impl FunnyWords {
                 Some(c) => c as u8 as usize,
             };
 
-            self.next_letter[key].push(next)
+            self.next_letter[key].push(next);
         }
     }
 }
