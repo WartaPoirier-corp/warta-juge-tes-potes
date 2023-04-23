@@ -3,17 +3,17 @@ extern crate rocket;
 
 pub mod id_gen;
 
+use crate::id_gen::FunnyWords;
 use rand::seq::IteratorRandom;
-use rocket::response::NamedFile;
+use rocket::fs::{FileServer, NamedFile};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
+use std::sync::{Arc, Weak};
 use ws_hotel::{
-    Context, Message, Relocation, ResultRelocation, Room, RoomRef, RoomHandler, CloseCode,
+    CloseCode, Context, Message, Relocation, ResultRelocation, Room, RoomHandler, RoomRef,
     RoomRefWeak,
 };
-use crate::id_gen::FunnyWords;
-use std::sync::{Arc, Weak};
 
 #[derive(Clone, Debug, Serialize)]
 struct Player {
@@ -70,7 +70,10 @@ impl Step {
 }
 
 impl Serialize for Step {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
         let n = match *self {
             Self::Lobby => 0,
             Self::Question(q) => q as i16,
@@ -141,9 +144,7 @@ enum ClientEventLobby {
     /// Asks the server if a room exists
     ///
     /// The server must always reply with a [ServerEvent::RoomProbeResult]
-    RoomProbe {
-        code: String,
-    },
+    RoomProbe { code: String },
 
     /// Asks the server to join a room if a code is given, or to create one and join it immediately
     /// else.
@@ -201,14 +202,16 @@ impl RoomHandler for Lobby {
             ClientEventLobby::RoomProbe { code } => {
                 let code = code.as_str();
 
-                let code = self.rooms.get_mut(code).and_then(|weak| weak.upgrade()).map(|_| code);
+                let code = self
+                    .rooms
+                    .get_mut(code)
+                    .and_then(|weak| weak.upgrade())
+                    .map(|_| code);
 
-                cx.send(&ServerEvent::RoomProbeResult {
-                    code,
-                })?;
+                cx.send(&ServerEvent::RoomProbeResult { code })?;
 
                 Ok(None)
-            },
+            }
             ClientEventLobby::JoinRoom {
                 username,
                 avatar,
@@ -219,7 +222,7 @@ impl RoomHandler for Lobby {
                         code: ErrorMsg::EmptyUsername,
                     })?;
 
-                    return Ok(None)
+                    return Ok(None);
                 }
 
                 let room = if let Some(code) = code {
@@ -245,8 +248,7 @@ impl RoomHandler for Lobby {
                     }
                 } else {
                     let code = loop {
-                        let chain =
-                            id_gen::Chain::new(&self.funny_words, 0.1, rand::thread_rng());
+                        let chain = id_gen::Chain::new(&self.funny_words, 0.1, rand::thread_rng());
 
                         let code = chain.take(8).collect::<String>();
 
@@ -259,8 +261,9 @@ impl RoomHandler for Lobby {
                     let room = GameRoom::create(
                         cx.room().upgrade().unwrap(),
                         Arc::downgrade(&self.questions),
-                        code, &self.questions,
-                        &mut rng
+                        code,
+                        &self.questions,
+                        &mut rng,
                     );
 
                     let code = room.code.clone();
@@ -339,10 +342,8 @@ impl RoomHandler for GameRoom {
                 self.votes.clear();
                 match self.step.advance() {
                     Step::Question(idx) => {
-                        let question = &self
-                            .all_questions
-                            .upgrade()
-                            .unwrap()[self.questions[idx as usize]];
+                        let question =
+                            &self.all_questions.upgrade().unwrap()[self.questions[idx as usize]];
 
                         use rand::seq::SliceRandom;
                         let mut rng = rand::thread_rng();
@@ -352,7 +353,8 @@ impl RoomHandler for GameRoom {
 
                         cx.broadcast_with(|_| {
                             Message::from(&NewRound {
-                                question: question.into_client(&players_rand.next().unwrap().username),
+                                question: question
+                                    .into_client(&players_rand.next().unwrap().username),
                             })
                         })?;
 
@@ -389,9 +391,7 @@ impl RoomHandler for GameRoom {
 
                 Ok(None)
             }
-            ClientEventGame::LeaveRoom => {
-                Ok(Some(Relocation::new(&self.lobby, ())))
-            }
+            ClientEventGame::LeaveRoom => Ok(Some(Relocation::new(&self.lobby, ()))),
         }
     }
 
@@ -408,48 +408,53 @@ impl RoomHandler for GameRoom {
 }
 
 #[rocket::launch]
-fn rocket() -> rocket::Rocket {
-    rocket::ignite()
+fn launch() -> _ {
+    rocket::build()
         .mount("/", routes![index,])
-        .mount(
-            "/static",
-            rocket_contrib::serve::StaticFiles::from("static"),
-        )
-        .attach(rocket::fairing::AdHoc::on_launch("WebSocket", |_| {
-            let funny_words = {
-                let file = BufReader::new(
-                    std::fs::File::open("funny_words.txt").expect("missing funny_words.txt"),
-                );
+        .mount("/static", FileServer::from("static"))
+        .attach(rocket::fairing::AdHoc::on_liftoff("WebSocket", |_| {
+            Box::pin(async {
+                let funny_words = {
+                    let file = BufReader::new(
+                        std::fs::File::open("funny_words.txt").expect("missing funny_words.txt"),
+                    );
 
-                file.lines()
+                    file.lines()
                         .filter_map(|l| l.ok())
                         .filter(|line| !line.is_empty())
                         .collect::<FunnyWords>()
-            };
+                };
 
-            let questions = {
-                // TODO: c pa opti
-                let content = std::fs::read_to_string("questions.ron").expect("Error while reading question.ron file");
-                let questions: Vec<Prompt> = ron::from_str(&content).expect("Error while parsing questions");
+                let questions = {
+                    // TODO: c pa opti
+                    let content = std::fs::read_to_string("questions.ron")
+                        .expect("Error while reading question.ron file");
+                    let questions: Vec<Prompt> =
+                        ron::from_str(&content).expect("Error while parsing questions");
 
-                println!("Read {} questions ({} tags)", questions.len(), questions.iter().filter(|x| match x {
-                    Prompt::Tag(_, _) => true,
-                    _ => false,
-                }).count());
+                    println!(
+                        "Read {} questions ({} tags)",
+                        questions.len(),
+                        questions
+                            .iter()
+                            .filter(|x| matches!(x, Prompt::Tag(_, _)))
+                            .count()
+                    );
 
-                questions.into_boxed_slice().into()
-            };
+                    questions.into_boxed_slice().into()
+                };
 
-            std::thread::spawn(move || {
-                ws_hotel::listen(
-                    "0.0.0.0:8008",
-                    Lobby {
-                        funny_words,
-                        questions,
-                        rooms: HashMap::new(),
-                    },
-                );
-            });
+                std::thread::spawn(move || {
+                    ws_hotel::listen(
+                        "0.0.0.0:8008",
+                        Lobby {
+                            funny_words,
+                            questions,
+                            rooms: HashMap::new(),
+                        },
+                    );
+                });
+            })
         }))
 }
 
@@ -464,7 +469,7 @@ impl GameRoom {
         all_questions: Weak<[Prompt]>,
         code: String,
         questions: &[Prompt],
-        rng: &mut R
+        rng: &mut R,
     ) -> Self {
         // Randomly choose 10 index for questions
         let v = (0..questions.len()).choose_multiple(rng, 10);
